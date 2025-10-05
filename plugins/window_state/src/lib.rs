@@ -1,43 +1,47 @@
 //! Window State Plugin for Iced
 //!
-//! This plugin automatically saves and restores window state (size, position, maximized)
+//! This plugin automatically saves and restores window state (size, position)
 //! to/from disk. It listens to window events and periodically saves changes.
 //!
 //! # Features
 //!
-//! - Automatic window state persistence
+//! - Automatic window state persistence per-application
 //! - Load state before app creation
-//! - Subscribe to window resize events
+//! - Subscribe to window resize and move events
 //! - Debounced auto-save every 2 seconds
 //! - Manual save support
 //!
 //! # Example
 //!
 //! ```ignore
-//! use iced_window_state_plugin::{WindowStatePlugin, WindowState};
+//! use iced_window_state_plugin::WindowStatePlugin;
+//! use iced::window::Position;
+//!
+//! const APP_NAME: &str = "my_app";
 //!
 //! fn main() -> iced::Result {
 //!     // Load window state before creating the app
-//!     let window_state = WindowStatePlugin::load_from_disk();
+//!     let window_state = WindowStatePlugin::load(APP_NAME).unwrap_or_default();
 //!
-//!     let settings = Settings {
-//!         window: window::Settings {
+//!     iced::application(App::new, App::update, App::view)
+//!         .window(window::Settings {
 //!             size: window_state.size,
-//!             position: window_state.position,
+//!             position: Position::Specific(window_state.position),
 //!             ..Default::default()
-//!         },
-//!         ..Default::default()
-//!     };
-//!
-//!     App::run(settings)
+//!         })
+//!         .run()
 //! }
+//!
+//! // In your app initialization:
+//! let mut plugins = PluginManager::new();
+//! plugins.install(WindowStatePlugin::new(APP_NAME.to_string()));
 //! ```
 
 use iced::Event::Window;
 use iced::event::listen_with;
 use iced::time::every;
 use iced::window::Event;
-use iced::{Subscription, Task, window};
+use iced::{Subscription, Task};
 use iced_plugins::Plugin;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -53,8 +57,6 @@ pub struct WindowState {
     /// Window position (x, y)
     #[serde(with = "point_serde")]
     pub position: iced::Point,
-    /// Whether the window is maximized
-    pub maximized: bool,
 }
 
 // Serde helpers for iced::Size
@@ -124,37 +126,7 @@ impl Default for WindowState {
         Self {
             size: iced::Size::new(800.0, 600.0),
             position: iced::Point::new(100.0, 100.0),
-            maximized: false,
         }
-    }
-}
-
-impl WindowState {
-    /// Get the path to the configuration file
-    pub fn config_path() -> PathBuf {
-        let config_dir = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-        config_dir.join("iced_plugins").join("window_state.json")
-    }
-
-    /// Load window state from disk
-    pub fn load() -> Self {
-        let path = Self::config_path();
-        if let Ok(contents) = fs::read_to_string(&path) {
-            serde_json::from_str(&contents).unwrap_or_default()
-        } else {
-            Self::default()
-        }
-    }
-
-    /// Save window state to disk
-    pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let path = Self::config_path();
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let contents = serde_json::to_string_pretty(self)?;
-        fs::write(path, contents)?;
-        Ok(())
     }
 }
 
@@ -165,14 +137,20 @@ pub enum WindowStateMessage {
     WindowEvent(iced::Event),
     /// Trigger a save to disk
     SaveToDisk,
+    /// Force save immediately
+    ForceSave,
+    /// Reset to default state
+    ResetToDefault,
 }
 
 /// The plugin state held by the PluginManager
 pub struct WindowPluginState {
     /// Current window state
-    pub state: WindowState,
+    state: WindowState,
     /// Whether state has changed since last save
-    pub dirty: bool,
+    dirty: bool,
+    /// Config path
+    config_path: PathBuf,
 }
 
 impl WindowPluginState {
@@ -181,47 +159,29 @@ impl WindowPluginState {
         &self.state
     }
 
-    /// Mark state as dirty (needs saving)
-    pub fn mark_dirty(&mut self) {
-        self.dirty = true;
-    }
-
-    /// Force save the current state to disk
-    pub fn force_save(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        self.state.save()?;
-        self.dirty = false;
-        Ok(())
+    /// Get the config path
+    pub fn config_path(&self) -> &PathBuf {
+        &self.config_path
     }
 }
 
 /// Window state plugin that manages window state persistence
 pub struct WindowStatePlugin {
-    /// Window ID to track
-    pub window_id: Option<window::Id>,
+    app_name: String,
     /// Auto-save interval in seconds
-    pub auto_save_interval: u64,
-}
-
-impl Default for WindowStatePlugin {
-    fn default() -> Self {
-        Self::new()
-    }
+    auto_save_interval: u64,
+    /// Config path
+    config_path: PathBuf,
 }
 
 impl WindowStatePlugin {
     /// Create a new window state plugin with default settings (tracks main window)
-    pub fn new() -> Self {
+    pub fn new(app_name: String) -> Self {
+        let config_path = Self::config_path(&app_name);
         Self {
-            window_id: None, // None means use the default/main window
+            app_name,
             auto_save_interval: 2,
-        }
-    }
-
-    /// Create a plugin for a specific window
-    pub fn for_window(window_id: window::Id) -> Self {
-        Self {
-            window_id: Some(window_id),
-            auto_save_interval: 2,
+            config_path,
         }
     }
 
@@ -231,8 +191,40 @@ impl WindowStatePlugin {
         self
     }
 
-    pub fn load_from_disk() -> WindowState {
-        WindowState::load()
+    /// Create a message to force save the current state
+    pub fn force_save() -> WindowStateMessage {
+        WindowStateMessage::ForceSave
+    }
+
+    /// Create a message to reset state to default
+    pub fn reset_to_default() -> WindowStateMessage {
+        WindowStateMessage::ResetToDefault
+    }
+
+    fn config_path(app_name: &str) -> PathBuf {
+        let config_dir = dirs::config_local_dir().unwrap_or_else(|| PathBuf::from("."));
+        config_dir
+            .join(app_name)
+            .join("plugins")
+            .join("window_state.json")
+    }
+
+    /// Load window state from disk
+    pub fn load(app_name: &str) -> Option<WindowState> {
+        let path = Self::config_path(app_name);
+        let contents = fs::read_to_string(&path).ok()?;
+        serde_json::from_str(&contents).ok()?
+    }
+
+    /// Save window state to disk
+    fn save(&self, state: &WindowState) -> Result<(), Box<dyn std::error::Error>> {
+        let path = &self.config_path;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let contents = serde_json::to_string_pretty(state)?;
+        fs::write(path, contents)?;
+        Ok(())
     }
 }
 
@@ -246,8 +238,9 @@ impl Plugin for WindowStatePlugin {
 
     fn init(&self) -> Self::State {
         WindowPluginState {
-            state: WindowState::load(),
+            state: Self::load(&self.app_name).unwrap_or_default(),
             dirty: false,
+            config_path: self.config_path.clone(),
         }
     }
 
@@ -267,11 +260,27 @@ impl Plugin for WindowStatePlugin {
             }
             WindowStateMessage::SaveToDisk => {
                 if state.dirty {
-                    if let Err(e) = state.state.save() {
+                    if let Err(e) = self.save(state.current_state()) {
                         eprintln!("Failed to save window state: {}", e);
                     } else {
                         state.dirty = false;
                     }
+                }
+            }
+            WindowStateMessage::ForceSave => {
+                if let Err(e) = self.save(state.current_state()) {
+                    eprintln!("Failed to force save window state: {}", e);
+                } else {
+                    state.dirty = false;
+                }
+            }
+            WindowStateMessage::ResetToDefault => {
+                state.state = WindowState::default();
+                state.dirty = true;
+                if let Err(e) = self.save(state.current_state()) {
+                    eprintln!("Failed to save reset window state: {}", e);
+                } else {
+                    state.dirty = false;
                 }
             }
             WindowStateMessage::WindowEvent(_) => {

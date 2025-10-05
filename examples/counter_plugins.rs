@@ -1,6 +1,6 @@
 use iced::widget::{button, column, container, text};
 use iced::{Element, Subscription, Task};
-use iced_plugins::{Plugin, PluginManager, PluginMessage};
+use iced_plugins::{Plugin, PluginHandle, PluginManager, PluginMessage};
 use std::time::Duration;
 
 fn main() -> iced::Result {
@@ -9,7 +9,6 @@ fn main() -> iced::Result {
         .run()
 }
 
-// Plugin 1: Counter Plugin
 #[derive(Clone, Debug)]
 pub enum CounterMessage {
     Increment,
@@ -90,7 +89,6 @@ impl Plugin for TimerPlugin {
     }
 }
 
-// Main Application - Only one message variant for all plugins!
 #[derive(Clone)]
 enum Message {
     Plugin(PluginMessage),
@@ -104,29 +102,26 @@ impl From<PluginMessage> for Message {
 
 struct App {
     plugins: PluginManager,
-    // Store message constructors for UI interactions
-    counter_msg: Box<dyn Fn(CounterMessage) -> Message + Send + Sync>,
+    counter_handle: PluginHandle<CounterPlugin>,
 }
 
 impl App {
     fn new() -> (Self, Task<Message>) {
         let mut plugins = PluginManager::new();
 
-        // Install plugins and get message constructors
-        let counter_msg = plugins.install(CounterPlugin);
+        let counter_handle = plugins.install(CounterPlugin);
         let _ = plugins.install(TimerPlugin);
 
         (
             App {
                 plugins,
-                counter_msg: Box::new(move |msg| Message::Plugin(counter_msg(msg))),
+                counter_handle,
             },
             Task::none(),
         )
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
-        // Automatic routing - plugin manager handles everything!
         match message {
             Message::Plugin(plugin_msg) => self.plugins.update(plugin_msg).map(From::from),
         }
@@ -139,21 +134,25 @@ impl App {
     fn view(&self) -> Element<'_, Message> {
         let counter_value = self
             .plugins
-            .get_typed_state::<CounterState>("counter")
+            .get_plugin_state::<CounterPlugin>()
             .map(|s| s.value)
             .unwrap_or(0);
 
         let timer_ticks = self
             .plugins
-            .get_typed_state::<TimerState>("timer")
+            .get_plugin_state::<TimerPlugin>()
             .map(|s| s.ticks)
             .unwrap_or(0);
 
         let content = column![
             text("Iced Plugin System - Type-Safe!").size(40),
             text(format!("Counter: {}", counter_value)).size(30),
-            button("Increment").on_press((self.counter_msg)(CounterMessage::Increment)),
-            button("Decrement").on_press((self.counter_msg)(CounterMessage::Decrement)),
+            button("Increment").on_press(Message::Plugin(
+                self.counter_handle.message(CounterMessage::Increment)
+            )),
+            button("Decrement").on_press(Message::Plugin(
+                self.counter_handle.message(CounterMessage::Decrement)
+            )),
             text(format!("Timer Ticks: {}", timer_ticks)).size(30),
             text(format!(
                 "Installed Plugins: {:?}",

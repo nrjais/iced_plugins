@@ -1,4 +1,4 @@
-use iced::Subscription;
+use iced::{Subscription, Task};
 use std::any::{Any, TypeId};
 use std::sync::Arc;
 
@@ -19,11 +19,44 @@ pub trait Plugin: Send + Sync {
 
     /// Update the plugin state based on a message
     /// Returns a Task that can produce more messages
-    fn update(&self, state: &mut Self::State, message: Self::Message) -> iced::Task<Self::Message>;
+    fn update(&self, state: &mut Self::State, message: Self::Message) -> Task<Self::Message>;
 
     /// Subscribe to external events
     /// The state is passed as a reference to allow subscription to depend on state
     fn subscription(&self, state: &Self::State) -> Subscription<Self::Message>;
+}
+
+/// A handle to a plugin that allows creating tasks for it
+#[derive(Clone)]
+pub struct PluginHandle<P: Plugin> {
+    plugin_index: usize,
+    _phantom: std::marker::PhantomData<P>,
+}
+
+impl<P: Plugin> PluginHandle<P> {
+    fn new(plugin_index: usize) -> Self {
+        Self {
+            plugin_index,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+
+    /// Create a task that dispatches a message to this plugin
+    ///
+    /// # Example
+    /// ```ignore
+    /// let handle = plugins.install(MyPlugin);
+    /// let task = handle.dispatch(MyMessage::DoSomething);
+    /// ```
+    pub fn dispatch(&self, message: P::Message) -> Task<PluginMessage> {
+        let plugin_msg = PluginMessage::new(self.plugin_index, message);
+        Task::done(plugin_msg)
+    }
+
+    /// Wrap a plugin message into a PluginMessage
+    pub fn message(&self, message: P::Message) -> PluginMessage {
+        PluginMessage::new(self.plugin_index, message)
+    }
 }
 
 /// A type-erased plugin message that can be routed automatically
@@ -54,10 +87,10 @@ impl PluginMessage {
 struct PluginEntry {
     name: &'static str,
     state: Box<dyn Any + Send>,
+    state_type_id: TypeId,
     message_type_id: TypeId,
-    update_fn: Box<
-        dyn Fn(&mut dyn Any, Arc<dyn Any + Send + Sync>) -> iced::Task<PluginMessage> + Send + Sync,
-    >,
+    update_fn:
+        Box<dyn Fn(&mut dyn Any, Arc<dyn Any + Send + Sync>) -> Task<PluginMessage> + Send + Sync>,
     subscription_fn: Box<dyn Fn(&dyn Any) -> Subscription<PluginMessage> + Send + Sync>,
 }
 
@@ -67,7 +100,7 @@ struct PluginEntry {
 /// # Example
 /// ```ignore
 /// struct App {
-///     plugins: PluginManager<Message>,
+///     plugins: PluginManager,
 ///     // ... other fields
 /// }
 /// ```
@@ -101,10 +134,7 @@ impl PluginManager {
     /// let to_plugin_msg = manager.install(MyPlugin);
     /// // Now use to_plugin_msg to wrap plugin messages
     /// ```
-    pub fn install<P>(
-        &mut self,
-        plugin: P,
-    ) -> impl Fn(P::Message) -> PluginMessage + Clone + Send + 'static
+    pub fn install<P>(&mut self, plugin: P) -> PluginHandle<P>
     where
         P: Plugin + 'static,
     {
@@ -113,6 +143,7 @@ impl PluginManager {
         let state = plugin.init();
         let plugin_index = self.plugins.len();
         let message_type_id = TypeId::of::<P::Message>();
+        let state_type_id = TypeId::of::<P::State>();
 
         let plugin_for_update = Arc::clone(&plugin);
         let update_fn = Box::new(
@@ -123,7 +154,7 @@ impl PluginManager {
                     // Map plugin message back to AppMsg via PluginMessage
                     task.map(move |plugin_msg| PluginMessage::new(plugin_index, plugin_msg))
                 } else {
-                    iced::Task::none()
+                    Task::none()
                 }
             },
         );
@@ -138,6 +169,7 @@ impl PluginManager {
         let entry = PluginEntry {
             name,
             state: Box::new(state),
+            state_type_id,
             message_type_id,
             update_fn,
             subscription_fn,
@@ -145,8 +177,8 @@ impl PluginManager {
 
         self.plugins.push(entry);
 
-        // Return a closure that wraps plugin messages
-        move |msg: P::Message| PluginMessage::new(plugin_index, msg)
+        // Return a handle to the plugin
+        PluginHandle::new(plugin_index)
     }
 
     /// Update the plugin manager with a plugin message.
@@ -161,7 +193,7 @@ impl PluginManager {
     ///     // ... other messages
     /// }
     /// ```
-    pub fn update(&mut self, message: PluginMessage) -> iced::Task<PluginMessage> {
+    pub fn update(&mut self, message: PluginMessage) -> Task<PluginMessage> {
         let plugin_index = message.plugin_index;
 
         if let Some(entry) = self.plugins.get_mut(plugin_index) {
@@ -169,10 +201,10 @@ impl PluginManager {
             if entry.message_type_id == message.type_id {
                 (entry.update_fn)(entry.state.as_mut(), Arc::clone(&message.message))
             } else {
-                iced::Task::none()
+                Task::none()
             }
         } else {
-            iced::Task::none()
+            Task::none()
         }
     }
 
@@ -208,45 +240,20 @@ impl PluginManager {
         self.plugins.iter().map(|p| p.name).collect()
     }
 
-    /// Get a reference to a plugin's state by name
-    /// Use `downcast_ref` on the result to get the concrete type
-    ///
-    /// # Example
-    /// ```ignore
-    /// if let Some(state) = manager.get_plugin_state("my_plugin") {
-    ///     if let Some(typed) = state.downcast_ref::<MyPluginState>() {
-    ///         // Use typed state
-    ///     }
-    /// }
-    /// ```
-    pub fn get_plugin_state(&self, name: &str) -> Option<&(dyn Any + Send)> {
+    pub fn get_plugin_state<P: Plugin>(&self) -> Option<&P::State> {
         self.plugins
             .iter()
-            .find(|p| p.name == name)
+            .find(|p| TypeId::of::<P::State>() == p.state_type_id)
             .map(|p| p.state.as_ref())
+            .and_then(|state| state.downcast_ref::<P::State>())
     }
 
-    /// Get a mutable reference to a plugin's state by name
-    /// Use `downcast_mut` on the result to get the concrete type
-    pub fn get_plugin_state_mut(&mut self, name: &str) -> Option<&mut (dyn Any + Send)> {
+    pub fn get_plugin_state_mut<P: Plugin>(&mut self) -> Option<&mut P::State> {
         self.plugins
             .iter_mut()
-            .find(|p| p.name == name)
+            .find(|p| TypeId::of::<P::State>() == p.state_type_id)
             .map(|p| p.state.as_mut())
-    }
-
-    /// Get plugin state with type safety
-    /// Returns None if plugin not found or type mismatch
-    pub fn get_typed_state<S: 'static>(&self, name: &str) -> Option<&S> {
-        self.get_plugin_state(name)
-            .and_then(|state| state.downcast_ref::<S>())
-    }
-
-    /// Get mutable plugin state with type safety
-    /// Returns None if plugin not found or type mismatch
-    pub fn get_typed_state_mut<S: 'static>(&mut self, name: &str) -> Option<&mut S> {
-        self.get_plugin_state_mut(name)
-            .and_then(|state| state.downcast_mut::<S>())
+            .and_then(|state| state.downcast_mut::<P::State>())
     }
 }
 

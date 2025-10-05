@@ -1,11 +1,12 @@
 use iced::widget::{button, column, container, text};
 use iced::window::Position;
 use iced::{Element, Subscription, Task, window};
-use iced_plugins::{PluginManager, PluginMessage};
-use iced_window_state_plugin::{WindowPluginState, WindowState, WindowStatePlugin};
+use iced_plugins::{PluginHandle, PluginManager, PluginMessage};
+use iced_window_state_plugin::WindowStatePlugin;
+const APP_NAME: &str = "window_state_plugin";
 
 fn main() -> iced::Result {
-    let window_state = WindowStatePlugin::load_from_disk();
+    let window_state = WindowStatePlugin::load(APP_NAME).unwrap_or_default();
 
     println!("Loading window state: {:?}", window_state);
     iced::application(App::new, App::update, App::view)
@@ -13,7 +14,6 @@ fn main() -> iced::Result {
         .window(window::Settings {
             size: window_state.size,
             position: Position::Specific(window_state.position),
-            maximized: window_state.maximized,
             ..Default::default()
         })
         .run()
@@ -35,49 +35,36 @@ impl From<PluginMessage> for Message {
 
 struct App {
     plugins: PluginManager,
+    window_handle: PluginHandle<WindowStatePlugin>,
 }
 
 impl App {
     fn new() -> (Self, Task<Message>) {
         let mut plugins = PluginManager::new();
 
-        // Install the window state plugin - automatic message routing
-        let _ = plugins.install(WindowStatePlugin::new());
+        let window_handle = plugins.install(WindowStatePlugin::new(APP_NAME.to_string()));
 
-        (App { plugins }, Task::none())
+        (
+            App {
+                plugins,
+                window_handle,
+            },
+            Task::none(),
+        )
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Plugin(plugin_msg) => self.plugins.update(plugin_msg).map(From::from),
 
-            Message::ManualSave => {
-                // Manually trigger a save
-                if let Some(state) = self
-                    .plugins
-                    .get_typed_state_mut::<WindowPluginState>("window_state")
-                {
-                    if let Err(e) = state.force_save() {
-                        eprintln!("Failed to save: {}", e);
-                    } else {
-                        println!("Manually saved window state!");
-                    }
-                }
-                Task::none()
-            }
-            Message::ResetWindow => {
-                // Reset to default window state
-                if let Some(state) = self
-                    .plugins
-                    .get_typed_state_mut::<WindowPluginState>("window_state")
-                {
-                    state.state = WindowState::default();
-                    state.mark_dirty();
-                    let _ = state.force_save();
-                }
-                // Note: Window resize/move commands may require specific window ID in iced master
-                Task::none()
-            }
+            Message::ManualSave => self
+                .window_handle
+                .dispatch(WindowStatePlugin::force_save())
+                .map(From::from),
+            Message::ResetWindow => self
+                .window_handle
+                .dispatch(WindowStatePlugin::reset_to_default())
+                .map(From::from),
         }
     }
 
@@ -86,17 +73,16 @@ impl App {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let window_state = self
+        let (window_state, config_path) = self
             .plugins
-            .get_typed_state::<WindowPluginState>("window_state")
-            .map(|s| s.current_state().clone())
+            .get_plugin_state::<WindowStatePlugin>()
+            .map(|s| (s.current_state().clone(), s.config_path().clone()))
             .unwrap_or_default();
 
         let info_text = format!(
             "Window State:\n\
              Size: {:.0}x{:.0}\n\
              Position: ({:.0}, {:.0})\n\
-             Maximized: {}\n\
              \n\
              Move or resize the window.\n\
              The state is automatically saved every 2 seconds.\n\
@@ -109,10 +95,8 @@ impl App {
             window_state.size.height,
             window_state.position.x,
             window_state.position.y,
-            window_state.maximized
         );
 
-        let config_path = WindowState::config_path();
         let path_text = format!("Config: {}", config_path.display());
 
         let content = column![
