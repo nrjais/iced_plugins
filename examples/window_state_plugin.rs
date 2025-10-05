@@ -72,11 +72,13 @@ impl App {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let (window_state, config_path) = self
+        let Some((window_state, config_path)) = self
             .plugins
             .get_plugin_state::<WindowStatePlugin>()
-            .map(|s| (s.current_state().clone(), s.config_path().clone()))
-            .unwrap_or_default();
+            .map(|s| (s.current_state(), s.config_path()))
+        else {
+            return container(text("No window state found")).into();
+        };
 
         let info_text = format!(
             "Window State:\n\
