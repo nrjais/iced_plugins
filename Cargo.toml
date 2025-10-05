@@ -3,4 +3,14 @@ name = "iced_plugins"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = [".", "plugins/window_state"]
+
 [dependencies]
+iced = { git = "https://github.com/iced-rs/iced", features = ["tokio"] }
+
+[dev-dependencies]
+dirs = "6.0"
+iced_window_state_plugin = { path = "plugins/window_state" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
