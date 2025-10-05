@@ -1,5 +1,8 @@
+use iced::advanced::subscription::{EventStream, Hasher, Recipe, from_recipe, into_recipes};
+use iced::futures::StreamExt;
 use iced::{Subscription, Task};
 use std::any::{Any, TypeId};
+use std::hash::Hash;
 use std::sync::Arc;
 
 /// Core trait that all plugins must implement.
@@ -60,7 +63,7 @@ impl<P: Plugin> PluginHandle<P> {
 }
 
 /// A type-erased plugin message that can be routed automatically
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PluginMessage {
     plugin_index: usize,
     message: Arc<dyn Any + Send + Sync>,
@@ -83,15 +86,88 @@ impl PluginMessage {
     }
 }
 
+/// Custom recipe that wraps an inner recipe and maps its output
+struct PluginRecipeWrapper<P: Plugin> {
+    inner: Box<dyn Recipe<Output = P::Message>>,
+    plugin_index: usize,
+    _phantom: std::marker::PhantomData<P>,
+}
+
+impl<P: Plugin + 'static> Recipe for PluginRecipeWrapper<P>
+where
+    P::Message: 'static,
+{
+    type Output = PluginMessage;
+
+    fn hash(&self, state: &mut Hasher) {
+        use std::any::TypeId;
+        TypeId::of::<P>().hash(state);
+        self.plugin_index.hash(state);
+        self.inner.hash(state);
+    }
+
+    fn stream(
+        self: Box<Self>,
+        input: EventStream,
+    ) -> std::pin::Pin<Box<dyn iced::futures::Stream<Item = Self::Output> + Send>> {
+        let plugin_index = self.plugin_index;
+        Box::pin(
+            self.inner
+                .stream(input)
+                .map(move |msg| PluginMessage::new(plugin_index, msg)),
+        )
+    }
+}
+
+/// Non-capturing function pointer for plugin subscriptions
+fn plugin_subscription_fn<P: Plugin + 'static>(
+    state: &dyn Any,
+    plugin: &(dyn Any + Send + Sync),
+    plugin_index: usize,
+) -> Subscription<PluginMessage> {
+    let typed_state = state.downcast_ref::<P::State>().unwrap();
+    let typed_plugin = plugin.downcast_ref::<Arc<P>>().unwrap();
+    let inner_sub = typed_plugin.subscription(typed_state);
+
+    // Extract recipes from inner subscription and wrap each one
+    let recipes = into_recipes(inner_sub);
+    let wrapped_subs: Vec<_> = recipes
+        .into_iter()
+        .map(|recipe| {
+            let wrapper = PluginRecipeWrapper::<P> {
+                inner: recipe,
+                plugin_index,
+                _phantom: std::marker::PhantomData,
+            };
+            from_recipe(wrapper)
+        })
+        .collect();
+
+    // Batch all wrapped subscriptions into a single subscription
+    Subscription::batch(wrapped_subs)
+}
+
 /// Holds a single plugin instance with its state and behavior
 struct PluginEntry {
     name: &'static str,
     state: Box<dyn Any + Send>,
     state_type_id: TypeId,
     message_type_id: TypeId,
+    plugin: Arc<dyn Any + Send + Sync>,
+    plugin_index: usize,
     update_fn:
         Box<dyn Fn(&mut dyn Any, Arc<dyn Any + Send + Sync>) -> Task<PluginMessage> + Send + Sync>,
-    subscription_fn: Box<dyn Fn(&dyn Any) -> Subscription<PluginMessage> + Send + Sync>,
+    subscription_fn: fn(&dyn Any, &(dyn Any + Send + Sync), usize) -> Subscription<PluginMessage>,
+}
+
+impl std::fmt::Debug for PluginEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "PluginEntry {{ name: {}, state_type_id: {:?}, message_type_id: {:?}, state: {:?} }}",
+            self.name, self.state_type_id, self.message_type_id, self.state
+        )
+    }
 }
 
 /// Main plugin manager that holds all installed plugins and their states.
@@ -104,6 +180,7 @@ struct PluginEntry {
 ///     // ... other fields
 /// }
 /// ```
+#[derive(Debug)]
 pub struct PluginManager {
     plugins: Vec<PluginEntry>,
 }
@@ -159,20 +236,15 @@ impl PluginManager {
             },
         );
 
-        let subscription_fn = Box::new(move |state: &dyn Any| {
-            let typed_state = state.downcast_ref::<P::State>().unwrap();
-            plugin
-                .subscription(typed_state)
-                .map(move |plugin_msg| PluginMessage::new(plugin_index, plugin_msg))
-        });
-
         let entry = PluginEntry {
             name,
             state: Box::new(state),
             state_type_id,
             message_type_id,
+            plugin: Arc::new(plugin) as Arc<dyn Any + Send + Sync>,
+            plugin_index,
             update_fn,
-            subscription_fn,
+            subscription_fn: plugin_subscription_fn::<P>,
         };
 
         self.plugins.push(entry);
@@ -221,7 +293,13 @@ impl PluginManager {
         let subs: Vec<Subscription<PluginMessage>> = self
             .plugins
             .iter()
-            .map(|entry| (entry.subscription_fn)(entry.state.as_ref()))
+            .map(|entry| {
+                (entry.subscription_fn)(
+                    entry.state.as_ref(),
+                    entry.plugin.as_ref(),
+                    entry.plugin_index,
+                )
+            })
             .collect();
 
         Subscription::batch(subs)

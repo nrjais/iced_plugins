@@ -19,7 +19,6 @@ fn main() -> iced::Result {
         .run()
 }
 
-// Main Application - Only one message variant for all plugins!
 #[derive(Clone)]
 enum Message {
     Plugin(PluginMessage),
@@ -103,8 +102,12 @@ impl App {
             text("Window State Plugin").size(32),
             text(info_text).size(14),
             text(path_text).size(11),
-            button("Manual Save").on_press(Message::ManualSave),
-            button("Reset to Default").on_press(Message::ResetWindow),
+            button("Manual Save")
+                .padding([2, 8])
+                .on_press(Message::ManualSave),
+            button("Reset to Default")
+                .padding([2, 8])
+                .on_press(Message::ResetWindow),
         ]
         .spacing(20)
         .padding(20);
