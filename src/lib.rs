@@ -1,8 +1,5 @@
-use iced::advanced::subscription::{EventStream, Hasher, Recipe, from_recipe, into_recipes};
-use iced::futures::StreamExt;
 use iced::{Subscription, Task};
 use std::any::{Any, TypeId};
-use std::hash::Hash;
 use std::sync::Arc;
 
 /// Core trait that all plugins must implement.
@@ -30,7 +27,7 @@ pub trait Plugin: Send + Sync {
 }
 
 /// A handle to a plugin that allows creating tasks for it
-#[derive(Clone)]
+#[derive(Clone, Debug, Copy)]
 pub struct PluginHandle<P: Plugin> {
     plugin_index: usize,
     _phantom: std::marker::PhantomData<P>,
@@ -86,39 +83,6 @@ impl PluginMessage {
     }
 }
 
-/// Custom recipe that wraps an inner recipe and maps its output
-struct PluginRecipeWrapper<P: Plugin> {
-    inner: Box<dyn Recipe<Output = P::Message>>,
-    plugin_index: usize,
-    _phantom: std::marker::PhantomData<P>,
-}
-
-impl<P: Plugin + 'static> Recipe for PluginRecipeWrapper<P>
-where
-    P::Message: 'static,
-{
-    type Output = PluginMessage;
-
-    fn hash(&self, state: &mut Hasher) {
-        use std::any::TypeId;
-        TypeId::of::<P>().hash(state);
-        self.plugin_index.hash(state);
-        self.inner.hash(state);
-    }
-
-    fn stream(
-        self: Box<Self>,
-        input: EventStream,
-    ) -> std::pin::Pin<Box<dyn iced::futures::Stream<Item = Self::Output> + Send>> {
-        let plugin_index = self.plugin_index;
-        Box::pin(
-            self.inner
-                .stream(input)
-                .map(move |msg| PluginMessage::new(plugin_index, msg)),
-        )
-    }
-}
-
 /// Non-capturing function pointer for plugin subscriptions
 fn plugin_subscription_fn<P: Plugin + 'static>(
     state: &dyn Any,
@@ -129,22 +93,9 @@ fn plugin_subscription_fn<P: Plugin + 'static>(
     let typed_plugin = plugin.downcast_ref::<Arc<P>>().unwrap();
     let inner_sub = typed_plugin.subscription(typed_state);
 
-    // Extract recipes from inner subscription and wrap each one
-    let recipes = into_recipes(inner_sub);
-    let wrapped_subs: Vec<_> = recipes
-        .into_iter()
-        .map(|recipe| {
-            let wrapper = PluginRecipeWrapper::<P> {
-                inner: recipe,
-                plugin_index,
-                _phantom: std::marker::PhantomData,
-            };
-            from_recipe(wrapper)
-        })
-        .collect();
-
-    // Batch all wrapped subscriptions into a single subscription
-    Subscription::batch(wrapped_subs)
+    inner_sub
+        .with(plugin_index)
+        .map(|(plugin_index, msg)| PluginMessage::new(plugin_index, msg))
 }
 
 /// Holds a single plugin instance with its state and behavior
@@ -225,10 +176,10 @@ impl PluginManager {
         let plugin_for_update = Arc::clone(&plugin);
         let update_fn = Box::new(
             move |state: &mut dyn Any, message: Arc<dyn Any + Send + Sync>| {
-                if let Some(msg) = message.downcast_ref::<P::Message>() {
-                    let typed_state = state.downcast_mut::<P::State>().unwrap();
+                if let Some(msg) = message.downcast_ref::<P::Message>()
+                    && let Some(typed_state) = state.downcast_mut::<P::State>()
+                {
                     let task = plugin_for_update.update(typed_state, msg.clone());
-                    // Map plugin message back to AppMsg via PluginMessage
                     task.map(move |plugin_msg| PluginMessage::new(plugin_index, plugin_msg))
                 } else {
                     Task::none()
@@ -248,8 +199,6 @@ impl PluginManager {
         };
 
         self.plugins.push(entry);
-
-        // Return a handle to the plugin
         PluginHandle::new(plugin_index)
     }
 
