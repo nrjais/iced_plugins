@@ -314,7 +314,7 @@ type AnyMessage = Arc<dyn Any + Send + Sync>;
 struct PluginEntry {
     name: &'static str,
     state: Box<dyn Any + Send>,
-    state_type_id: TypeId,
+    plugin_type: TypeId,
     message_type_id: TypeId,
     output_type_id: TypeId,
     plugin: AnyPlugin,
@@ -331,8 +331,8 @@ impl std::fmt::Debug for PluginEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "PluginEntry {{ name: {}, state_type_id: {:?}, message_type_id: {:?}, output_type_id: {:?}, state: {:?} }}",
-            self.name, self.state_type_id, self.message_type_id, self.output_type_id, self.state
+            "PluginEntry {{ name: {}, plugin_type: {:?}, message_type_id: {:?}, output_type_id: {:?}, state: {:?} }}",
+            self.name, self.plugin_type, self.message_type_id, self.output_type_id, self.state
         )
     }
 }
@@ -414,7 +414,7 @@ impl PluginManager {
         let entry = PluginEntry {
             name,
             state: Box::new(state),
-            state_type_id,
+            plugin_type: TypeId::of::<P>(),
             message_type_id,
             output_type_id,
             plugin: Arc::new(plugin),
@@ -504,20 +504,38 @@ impl PluginManager {
         self.plugins.iter().map(|p| p.name).collect()
     }
 
-    pub fn get_plugin_state<P: Plugin>(&self) -> Option<&P::State> {
+    pub fn get_plugin_state<P: Plugin + 'static>(&self) -> Option<&P::State> {
         self.plugins
             .iter()
-            .find(|p| TypeId::of::<P::State>() == p.state_type_id)
+            .find(|p| TypeId::of::<P>() == p.plugin_type)
             .map(|p| p.state.as_ref())
             .and_then(|state| state.downcast_ref::<P::State>())
     }
 
-    pub fn get_plugin_state_mut<P: Plugin>(&mut self) -> Option<&mut P::State> {
+    pub fn get_plugin_state_mut<P: Plugin + 'static>(&mut self) -> Option<&mut P::State> {
         self.plugins
             .iter_mut()
-            .find(|p| TypeId::of::<P::State>() == p.state_type_id)
+            .find(|p| TypeId::of::<P>() == p.plugin_type)
             .map(|p| p.state.as_mut())
             .and_then(|state| state.downcast_mut::<P::State>())
+    }
+
+    /// Get a handle to an installed plugin by its type.
+    /// Returns None if the plugin is not installed.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let handle: Option<PluginHandle<MyPlugin>> = manager.get_handle();
+    /// if let Some(handle) = handle {
+    ///     // Use handle to dispatch messages
+    ///     let task = handle.dispatch(MyMessage::DoSomething);
+    /// }
+    /// ```
+    pub fn get_handle<P: Plugin + 'static>(&self) -> Option<PluginHandle<P>> {
+        self.plugins
+            .iter()
+            .find(|p| TypeId::of::<P>() == p.plugin_type)
+            .map(|p| PluginHandle::new(p.plugin_index, Arc::clone(&self.output_registry)))
     }
 }
 

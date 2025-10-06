@@ -384,9 +384,13 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
+        let updater_sub = self
+            .plugins
+            .get_handle::<AutoUpdaterPlugin>()
+            .map(|handle| handle.listen().map(Message::UpdaterOutput));
         Subscription::batch([
             self.plugins.subscriptions().map(Message::Plugin),
-            self.updater_handle.listen().map(Message::UpdaterOutput),
+            updater_sub.unwrap_or(Subscription::none()),
         ])
     }
 }
