@@ -8,7 +8,6 @@ members = [".", "plugins/auto_updater", "plugins/window_state"]
 
 [dependencies]
 iced = { git = "https://github.com/iced-rs/iced", features = [
-  "advanced",
   "tokio",
 ] }
 
