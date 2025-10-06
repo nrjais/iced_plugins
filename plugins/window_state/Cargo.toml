@@ -3,7 +3,7 @@ name = "iced_window_state_plugin"
 version = "0.1.0"
 edition = "2024"
 description = "Window state management plugin for Iced applications"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 
 [dependencies]
 dirs = "6.0"
