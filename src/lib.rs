@@ -394,7 +394,6 @@ impl PluginManager {
         let state = plugin.init();
         let plugin_index = self.plugins.len();
         let message_type_id = TypeId::of::<P::Message>();
-        let state_type_id = TypeId::of::<P::State>();
         let output_type_id = TypeId::of::<P::Output>();
 
         let plugin_for_update = Arc::clone(&plugin);
