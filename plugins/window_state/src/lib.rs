@@ -143,6 +143,19 @@ pub enum WindowStateMessage {
     ResetToDefault,
 }
 
+/// Output messages emitted by the window state plugin
+#[derive(Clone, Debug)]
+pub enum WindowStateOutput {
+    /// Window state was saved to disk
+    StateSaved(WindowState),
+    /// Window state was updated (but not yet saved)
+    StateUpdated(WindowState),
+    /// An error occurred while saving
+    SaveError(String),
+    /// Window state was reset to default
+    StateReset(WindowState),
+}
+
 /// The plugin state held by the PluginManager
 pub struct WindowPluginState {
     /// Current window state
@@ -231,6 +244,7 @@ impl WindowStatePlugin {
 impl Plugin for WindowStatePlugin {
     type Message = WindowStateMessage;
     type State = WindowPluginState;
+    type Output = WindowStateOutput;
 
     fn name(&self) -> &'static str {
         "window_state"
@@ -244,34 +258,50 @@ impl Plugin for WindowStatePlugin {
         }
     }
 
-    fn update(&self, state: &mut Self::State, message: Self::Message) -> Task<Self::Message> {
-        match message {
+    fn update(
+        &self,
+        state: &mut Self::State,
+        message: Self::Message,
+    ) -> (Task<Self::Message>, Option<Self::Output>) {
+        let output = match message {
             WindowStateMessage::WindowEvent(Window(Event::Resized(size))) => {
                 if state.state.size != size {
                     state.state.size = size;
                     state.dirty = true;
+                    Some(WindowStateOutput::StateUpdated(state.state.clone()))
+                } else {
+                    None
                 }
             }
             WindowStateMessage::WindowEvent(Window(Event::Moved(position))) => {
                 if state.state.position != position {
                     state.state.position = position;
                     state.dirty = true;
+                    Some(WindowStateOutput::StateUpdated(state.state.clone()))
+                } else {
+                    None
                 }
             }
             WindowStateMessage::SaveToDisk => {
                 if state.dirty {
                     if let Err(e) = self.save(state.current_state()) {
                         eprintln!("Failed to save window state: {}", e);
+                        Some(WindowStateOutput::SaveError(e.to_string()))
                     } else {
                         state.dirty = false;
+                        Some(WindowStateOutput::StateSaved(state.state.clone()))
                     }
+                } else {
+                    None
                 }
             }
             WindowStateMessage::ForceSave => {
                 if let Err(e) = self.save(state.current_state()) {
                     eprintln!("Failed to force save window state: {}", e);
+                    Some(WindowStateOutput::SaveError(e.to_string()))
                 } else {
                     state.dirty = false;
+                    Some(WindowStateOutput::StateSaved(state.state.clone()))
                 }
             }
             WindowStateMessage::ResetToDefault => {
@@ -279,15 +309,19 @@ impl Plugin for WindowStatePlugin {
                 state.dirty = true;
                 if let Err(e) = self.save(state.current_state()) {
                     eprintln!("Failed to save reset window state: {}", e);
+                    Some(WindowStateOutput::SaveError(e.to_string()))
                 } else {
                     state.dirty = false;
+                    Some(WindowStateOutput::StateReset(state.state.clone()))
                 }
             }
             WindowStateMessage::WindowEvent(_) => {
                 // Ignore other window events, they are filtered out by the listen_with
+                None
             }
-        }
-        Task::none()
+        };
+
+        (Task::none(), output)
     }
 
     fn subscription(&self, _state: &Self::State) -> Subscription<Self::Message> {

@@ -24,6 +24,7 @@ pub struct CounterPlugin;
 impl Plugin for CounterPlugin {
     type Message = CounterMessage;
     type State = CounterState;
+    type Output = ();
 
     fn name(&self) -> &'static str {
         "counter"
@@ -33,15 +34,19 @@ impl Plugin for CounterPlugin {
         CounterState { value: 0 }
     }
 
-    fn update(&self, state: &mut Self::State, message: Self::Message) -> iced::Task<Self::Message> {
+    fn update(
+        &self,
+        state: &mut Self::State,
+        message: Self::Message,
+    ) -> (iced::Task<Self::Message>, Option<Self::Output>) {
         match message {
             CounterMessage::Increment => {
                 state.value += 1;
-                iced::Task::none()
+                (iced::Task::none(), None)
             }
             CounterMessage::Decrement => {
                 state.value -= 1;
-                iced::Task::none()
+                (iced::Task::none(), None)
             }
         }
     }
@@ -66,6 +71,7 @@ pub struct TimerPlugin;
 impl Plugin for TimerPlugin {
     type Message = TimerMessage;
     type State = TimerState;
+    type Output = ();
 
     fn name(&self) -> &'static str {
         "timer"
@@ -75,11 +81,15 @@ impl Plugin for TimerPlugin {
         TimerState { ticks: 0 }
     }
 
-    fn update(&self, state: &mut Self::State, message: Self::Message) -> iced::Task<Self::Message> {
+    fn update(
+        &self,
+        state: &mut Self::State,
+        message: Self::Message,
+    ) -> (iced::Task<Self::Message>, Option<Self::Output>) {
         match message {
             TimerMessage::Tick => {
                 state.ticks += 1;
-                iced::Task::none()
+                (iced::Task::none(), None)
             }
         }
     }

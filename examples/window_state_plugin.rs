@@ -2,7 +2,7 @@ use iced::widget::{button, column, container, text};
 use iced::window::Position;
 use iced::{Element, Subscription, Task, window};
 use iced_plugins::{PluginHandle, PluginManager, PluginMessage};
-use iced_window_state_plugin::WindowStatePlugin;
+use iced_window_state_plugin::{WindowStateOutput, WindowStatePlugin};
 const APP_NAME: &str = "window_state_plugin";
 
 fn main() -> iced::Result {
@@ -22,6 +22,7 @@ fn main() -> iced::Result {
 #[derive(Clone)]
 enum Message {
     Plugin(PluginMessage),
+    PluginOutput(WindowStateOutput),
     ManualSave,
     ResetWindow,
 }
@@ -35,6 +36,7 @@ impl From<PluginMessage> for Message {
 struct App {
     plugins: PluginManager,
     window_handle: PluginHandle<WindowStatePlugin>,
+    count: u32,
 }
 
 impl App {
@@ -47,6 +49,7 @@ impl App {
             App {
                 plugins,
                 window_handle,
+                count: 0,
             },
             Task::none(),
         )
@@ -64,11 +67,21 @@ impl App {
                 .window_handle
                 .dispatch(WindowStatePlugin::reset_to_default())
                 .map(From::from),
+            Message::PluginOutput(output) => {
+                self.count += 1;
+                println!("count: {}, output: {:?}", self.count, output);
+                Task::none()
+            }
         }
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        self.plugins.subscriptions().map(From::from)
+        let window_sub = if self.count < 100 {
+            self.window_handle.listen().map(Message::PluginOutput)
+        } else {
+            Subscription::none()
+        };
+        Subscription::batch([self.plugins.subscriptions().map(From::from), window_sub])
     }
 
     fn view(&self) -> Element<'_, Message> {

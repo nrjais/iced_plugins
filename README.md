@@ -9,6 +9,7 @@ A type-safe plugin system for [Iced](https://github.com/iced-rs/iced) applicatio
 - **State Management**: Each plugin manages its own state
 - **Task Support**: Plugins can produce tasks that map back to app messages
 - **Subscriptions**: Plugins can subscribe to external events
+- **Output Streams**: Subscribe to plugin output messages with filtering
 
 ## Quick Start
 
@@ -75,6 +76,7 @@ pub struct MyState {
 impl Plugin for MyPlugin {
     type Message = MyMessage;
     type State = MyState;
+    type Output = ();  // Or your output message type
 
     fn name(&self) -> &'static str {
         "my_plugin"
@@ -84,11 +86,11 @@ impl Plugin for MyPlugin {
         MyState { counter: 0 }
     }
 
-    fn update(&self, state: &mut Self::State, message: Self::Message) -> Task<Self::Message> {
+    fn update(&self, state: &mut Self::State, message: Self::Message) -> (Task<Self::Message>, Option<Self::Output>) {
         match message {
             MyMessage::DoSomething => {
                 state.counter += 1;
-                Task::none()
+                (Task::none(), None)
             }
         }
     }
@@ -96,6 +98,52 @@ impl Plugin for MyPlugin {
     fn subscription(&self, _state: &Self::State) -> Subscription<Self::Message> {
         Subscription::none()
     }
+}
+```
+
+## Subscribing to Plugin Outputs
+
+Plugins can emit output messages that you can subscribe to:
+
+```rust
+#[derive(Clone, Debug)]
+pub enum MyOutput {
+    CounterChanged(u32),
+    TaskCompleted,
+}
+
+impl Plugin for MyPlugin {
+    type Output = MyOutput;
+
+    fn update(&self, state: &mut Self::State, message: Self::Message) -> (Task<Self::Message>, Option<Self::Output>) {
+        match message {
+            MyMessage::DoSomething => {
+                state.counter += 1;
+                // Emit output message
+                (Task::none(), Some(MyOutput::CounterChanged(state.counter)))
+            }
+        }
+    }
+}
+
+// In your app, subscribe to plugin outputs:
+enum Message {
+    Plugin(PluginMessage),
+    PluginOutput(MyOutput),
+}
+
+fn subscription(&self) -> Subscription<Message> {
+    Subscription::batch([
+        self.plugins.subscriptions().map(Message::Plugin),
+        Subscription::run(|| {
+            self.plugins
+                .subscribe_to_outputs()
+                .from_plugin(&self.my_plugin_handle)
+                .build_filtered(|output: &MyOutput| {
+                    Message::PluginOutput(output.clone())
+                })
+        }),
+    ])
 }
 ```
 
