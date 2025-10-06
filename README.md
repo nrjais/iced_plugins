@@ -7,9 +7,9 @@ A type-safe plugin system for [Iced](https://github.com/iced-rs/iced) applicatio
 - **Type-Safe**: Full compile-time type safety with automatic message routing
 - **Zero Boilerplate**: Plugins integrate seamlessly with `PluginMessage`
 - **State Management**: Each plugin manages its own state
-- **Task Support**: Plugins can produce tasks that map back to app messages
+- **Task Support**: Plugins can produce background tasks
 - **Subscriptions**: Plugins can subscribe to external events
-- **Output Streams**: Subscribe to plugin output messages with filtering
+- **Output Streams**: Subscribe to plugin output messages, withe filtering
 
 ## Quick Start
 
@@ -135,14 +135,26 @@ enum Message {
 fn subscription(&self) -> Subscription<Message> {
     Subscription::batch([
         self.plugins.subscriptions().map(Message::Plugin),
-        Subscription::run(|| {
-            self.plugins
-                .subscribe_to_outputs()
-                .from_plugin(&self.my_plugin_handle)
-                .build_filtered(|output: &MyOutput| {
-                    Message::PluginOutput(output.clone())
-                })
-        }),
+        // Listen to all outputs
+        self.my_plugin_handle.listen().map(Message::PluginOutput),
+    ])
+}
+```
+
+### Filtering Plugin Outputs
+
+You can filter outputs to only receive specific events:
+
+```rust
+fn subscription(&self) -> Subscription<Message> {
+    Subscription::batch([
+        self.plugins.subscriptions().map(Message::Plugin),
+        // Only receive CounterChanged outputs
+        self.my_plugin_handle
+            .listen_filtered(|output| {
+                matches!(output, MyOutput::CounterChanged(_))
+            })
+            .map(Message::PluginOutput),
     ])
 }
 ```

@@ -77,7 +77,9 @@ impl App {
 
     fn subscription(&self) -> Subscription<Message> {
         let window_sub = if self.count < 100 {
-            self.window_handle.listen().map(Message::PluginOutput)
+            self.window_handle
+                .listen_with(|output| matches!(output, WindowStateOutput::StateSaved(_)))
+                .map(Message::PluginOutput)
         } else {
             Subscription::none()
         };

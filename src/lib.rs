@@ -39,11 +39,12 @@ pub trait Plugin: Send + Sync {
 /// Shared registry for managing output subscriptions
 type OutputRegistry = Arc<Mutex<HashMap<usize, Vec<mpsc::UnboundedSender<PluginOutput>>>>>;
 
-/// Creates a stream that listens for plugin outputs
-fn output_listener<O: Clone + Send + Sync + 'static>(
+/// Creates a stream that listens for plugin outputs with optional filtering
+fn output_listener_filtered<O: Clone + Send + Sync + 'static>(
     plugin_index: usize,
     output_type_id: TypeId,
     registry: OutputRegistry,
+    filter: Option<Arc<dyn Fn(&O) -> bool + Send + Sync>>,
 ) -> impl iced::futures::Stream<Item = O> {
     use iced::futures::{SinkExt, StreamExt};
 
@@ -61,11 +62,17 @@ fn output_listener<O: Clone + Send + Sync + 'static>(
         loop {
             match receiver.next().await {
                 Some(output) => {
-                    if plugin_index == output.plugin_index() && output_type_id == output.type_id {
-                        if let Some(typed_output) = output.downcast::<O>() {
-                            if output_sender.send(typed_output.clone()).await.is_err() {
-                                break;
-                            }
+                    if plugin_index == output.plugin_index()
+                        && output_type_id == output.type_id
+                        && let Some(typed_output) = output.downcast::<O>()
+                    {
+                        let should_send = match &filter {
+                            Some(f) => f(typed_output),
+                            None => true,
+                        };
+
+                        if should_send && output_sender.send(typed_output.clone()).await.is_err() {
+                            break;
                         }
                     }
                 }
@@ -112,13 +119,15 @@ impl<P: Plugin> PluginHandle<P> {
         PluginMessage::new(self.plugin_index, message)
     }
 
-    /// Subscribe to outputs from this plugin
+    /// Subscribe to outputs from this plugin with an optional filter
     ///
-    /// Creates a subscription that will receive all outputs emitted by this plugin.
+    /// Creates a subscription that will receive outputs emitted by this plugin.
+    /// If a filter is provided, only outputs that pass the filter will be received.
     /// When the subscription ends, it is automatically cleaned up.
     ///
     /// # Example
     /// ```ignore
+    /// // Listen to all outputs
     /// fn subscription(&self) -> Subscription<Message> {
     ///     Subscription::batch([
     ///         self.plugins.subscriptions().map(Message::Plugin),
@@ -127,10 +136,41 @@ impl<P: Plugin> PluginHandle<P> {
     /// }
     /// ```
     pub fn listen(&self) -> iced::Subscription<P::Output> {
+        self.listen_with_filter(None)
+    }
+
+    /// Subscribe to filtered outputs from this plugin
+    ///
+    /// Creates a subscription that will only receive outputs that pass the filter predicate.
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Only listen to specific window events
+    /// fn subscription(&self) -> Subscription<Message> {
+    ///     self.window_handle
+    ///         .listen_filtered(|output| {
+    ///             matches!(output, WindowStateOutput::Saved)
+    ///         })
+    ///         .map(Message::WindowOutput)
+    /// }
+    /// ```
+    pub fn listen_with<F>(&self, filter: F) -> iced::Subscription<P::Output>
+    where
+        F: Fn(&P::Output) -> bool + Send + Sync + 'static,
+    {
+        self.listen_with_filter(Some(Arc::new(filter)))
+    }
+
+    fn listen_with_filter(
+        &self,
+        filter: Option<Arc<dyn Fn(&P::Output) -> bool + Send + Sync>>,
+    ) -> iced::Subscription<P::Output> {
         struct ListenState<O> {
             plugin_index: usize,
             output_type_id: TypeId,
             registry: OutputRegistry,
+            filter: Option<Arc<dyn Fn(&O) -> bool + Send + Sync>>,
+            filter_id: u64, // For hashing
             _phantom: std::marker::PhantomData<O>,
         }
 
@@ -138,6 +178,7 @@ impl<P: Plugin> PluginHandle<P> {
             fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
                 self.plugin_index.hash(state);
                 std::any::type_name::<O>().hash(state);
+                self.filter_id.hash(state);
             }
         }
 
@@ -147,6 +188,8 @@ impl<P: Plugin> PluginHandle<P> {
                     plugin_index: self.plugin_index,
                     output_type_id: self.output_type_id,
                     registry: Arc::clone(&self.registry),
+                    filter: self.filter.clone(),
+                    filter_id: self.filter_id,
                     _phantom: std::marker::PhantomData,
                 }
             }
@@ -155,17 +198,26 @@ impl<P: Plugin> PluginHandle<P> {
         fn create_stream<O: Clone + Send + Sync + 'static>(
             state: &ListenState<O>,
         ) -> iced::futures::stream::BoxStream<'static, O> {
-            Box::pin(output_listener::<O>(
+            Box::pin(output_listener_filtered::<O>(
                 state.plugin_index,
                 state.output_type_id,
                 Arc::clone(&state.registry),
+                state.filter.clone(),
             ))
         }
+
+        // Generate a unique ID for the filter based on its presence
+        let filter_id = filter
+            .as_ref()
+            .map(|f| Arc::as_ptr(f) as *const () as u64)
+            .unwrap_or(0);
 
         let state = ListenState::<P::Output> {
             plugin_index: self.plugin_index,
             output_type_id: TypeId::of::<P::Output>(),
             registry: Arc::clone(&self.output_registry),
+            filter,
+            filter_id,
             _phantom: std::marker::PhantomData,
         };
 
@@ -397,13 +449,12 @@ impl PluginManager {
                     (entry.update_fn)(entry.state.as_mut(), Arc::clone(&message.message));
 
                 // Send output to all subscribers via the output registry
-                if let Some(output) = output {
-                    if let Ok(mut registry) = self.output_registry.lock() {
-                        if let Some(senders) = registry.get_mut(&plugin_index) {
-                            // Send to all subscribers and remove disconnected ones
-                            senders.retain(|sender| sender.unbounded_send(output.clone()).is_ok());
-                        }
-                    }
+                if let Some(output) = output
+                    && let Ok(mut registry) = self.output_registry.lock()
+                    && let Some(senders) = registry.get_mut(&plugin_index)
+                {
+                    // Send to all subscribers and remove disconnected ones
+                    senders.retain(|sender| sender.unbounded_send(output.clone()).is_ok());
                 }
 
                 task
