@@ -2,7 +2,7 @@ use iced::widget::{button, column, container, text};
 use iced::window::Position;
 use iced::{Element, Subscription, Task, window};
 use iced_plugins::{PluginHandle, PluginManager, PluginMessage};
-use iced_window_state_plugin::{WindowStateOutput, WindowStatePlugin};
+use iced_window_state_plugin::{WindowStateMessage, WindowStateOutput, WindowStatePlugin};
 const APP_NAME: &str = "window_state_plugin";
 
 fn main() -> iced::Result {
@@ -61,11 +61,11 @@ impl App {
 
             Message::ManualSave => self
                 .window_handle
-                .dispatch(WindowStatePlugin::force_save())
+                .dispatch(WindowStateMessage::ForceSave)
                 .map(From::from),
             Message::ResetWindow => self
                 .window_handle
-                .dispatch(WindowStatePlugin::reset_to_default())
+                .dispatch(WindowStateMessage::ResetToDefault)
                 .map(From::from),
             Message::PluginOutput(output) => {
                 self.count += 1;

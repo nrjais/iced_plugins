@@ -204,16 +204,6 @@ impl WindowStatePlugin {
         self
     }
 
-    /// Create a message to force save the current state
-    pub fn force_save() -> WindowStateMessage {
-        WindowStateMessage::ForceSave
-    }
-
-    /// Create a message to reset state to default
-    pub fn reset_to_default() -> WindowStateMessage {
-        WindowStateMessage::ResetToDefault
-    }
-
     fn config_path(app_name: &str) -> PathBuf {
         let config_dir = dirs::config_local_dir().unwrap_or_else(|| PathBuf::from("."));
         config_dir
