@@ -176,11 +176,11 @@ Message::ButtonClick => {
 ## Available Plugins
 
 - **[window_state](plugins/window_state)** - Automatically save and restore window size/position
+- **[auto_updater](plugins/auto_updater)** - Automatic updates from GitHub releases with SHA256 verification (macOS)
 
 ## Examples
 
 - `cargo run --example counter_plugins` - Multiple plugins working together
 - `cargo run --example window_state_plugin` - Window state persistence
-
-## License
+- `cargo run --example auto_updater_plugin` - Automatic updates from GitHub
 

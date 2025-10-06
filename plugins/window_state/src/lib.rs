@@ -145,6 +145,7 @@ pub enum WindowStateMessage {
 
 /// Output messages emitted by the window state plugin
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum WindowStateOutput {
     /// Window state was saved to disk
     StateSaved(WindowState),
@@ -205,7 +206,9 @@ impl WindowStatePlugin {
     }
 
     fn config_path(app_name: &str) -> PathBuf {
-        let config_dir = dirs::config_local_dir().unwrap_or_else(|| PathBuf::from("."));
+        let config_dir = directories::BaseDirs::new()
+            .map(|dirs| dirs.config_local_dir().to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
         config_dir
             .join(app_name)
             .join("plugins")

@@ -103,5 +103,3 @@ let (state, path) = plugins
 ```bash
 cargo run --example window_state_plugin
 ```
-
-Try resizing/moving the window, closing the app, and reopening - your window state persists!
