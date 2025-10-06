@@ -15,7 +15,7 @@ members = [
 [workspace.dependencies]
 directories = "6.0"
 hex = "0.4"
-iced = { git = "https://github.com/iced-rs/iced", branch = "master" }
+iced = { git = "https://github.com/nrjais/iced", branch = "editor" }
 image = "0.25"
 reqwest = { version = "0.12", default-features = false, features = [
   "json",
