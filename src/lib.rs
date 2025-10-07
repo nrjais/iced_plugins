@@ -2,16 +2,17 @@ use iced::futures::channel::mpsc;
 use iced::{Subscription, Task};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
 /// Core trait that all plugins must implement.
 /// Plugins can have their own state and respond to messages.
-pub trait Plugin: Send + Sync {
+pub trait Plugin: Send + Sync + Debug {
     /// The message type this plugin handles
-    type Message: Clone + Send + Sync + 'static;
+    type Message: Clone + Send + Sync + Debug + 'static;
 
     /// The state type for this plugin
-    type State: Send + 'static;
+    type State: Send + Debug + 'static;
 
     /// The output message type this plugin can emit
     /// These can be subscribed to by application code

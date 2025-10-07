@@ -158,6 +158,7 @@ pub enum WindowStateOutput {
 }
 
 /// The plugin state held by the PluginManager
+#[derive(Debug, Clone)]
 pub struct WindowPluginState {
     /// Current window state
     state: WindowState,
@@ -180,6 +181,7 @@ impl WindowPluginState {
 }
 
 /// Window state plugin that manages window state persistence
+#[derive(Debug, Clone)]
 pub struct WindowStatePlugin {
     app_name: String,
     /// Auto-save interval in seconds

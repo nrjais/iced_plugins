@@ -15,10 +15,12 @@ pub enum CounterMessage {
     Decrement,
 }
 
+#[derive(Debug, Clone)]
 pub struct CounterState {
     value: i32,
 }
 
+#[derive(Debug, Clone)]
 pub struct CounterPlugin;
 
 impl Plugin for CounterPlugin {
@@ -62,10 +64,12 @@ pub enum TimerMessage {
     Tick,
 }
 
+#[derive(Debug, Clone)]
 pub struct TimerState {
     ticks: u32,
 }
 
+#[derive(Debug, Clone)]
 pub struct TimerPlugin;
 
 impl Plugin for TimerPlugin {

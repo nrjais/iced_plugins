@@ -164,6 +164,7 @@ pub enum AutoUpdaterOutput {
 }
 
 /// The plugin state held by the PluginManager
+#[derive(Debug, Clone)]
 pub struct AutoUpdaterState {
     /// Current download progress
     pub download_progress: Option<DownloadProgress>,
@@ -176,6 +177,7 @@ pub struct AutoUpdaterState {
 }
 
 /// Auto updater plugin
+#[derive(Debug, Clone)]
 pub struct AutoUpdaterPlugin {
     app_name: String,
     config: UpdaterConfig,
