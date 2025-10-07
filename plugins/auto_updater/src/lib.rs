@@ -35,16 +35,18 @@
 //! }
 //! ```
 
+mod macos;
+
 use iced::time::every;
 use iced::{Subscription, Task};
 use iced_plugins::Plugin;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::PathBuf;
 use std::time::Duration;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
+use tokio::process::Command;
 
 /// Configuration for the auto updater
 #[derive(Debug, Clone)]
@@ -345,26 +347,9 @@ impl AutoUpdaterPlugin {
         let os = Self::detect_os();
 
         match os {
-            "macos" => Self::install_macos(file_path).await,
+            "macos" => macos::install(file_path).await,
             "linux" => Self::install_deb(file_path).await,
             _ => Err(format!("Unsupported platform: {}", os)),
-        }
-    }
-
-    /// Install the update on macOS
-    async fn install_macos(file_path: PathBuf) -> Result<(), String> {
-        let extension = file_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .ok_or_else(|| "Unknown file type".to_string())?;
-
-        match extension {
-            "dmg" => Self::install_dmg(file_path).await,
-            "gz" if file_path.to_string_lossy().ends_with(".tar.gz") => {
-                Self::install_tar_gz(file_path).await
-            }
-            "zip" => Self::install_zip(file_path).await,
-            _ => Err(format!("Unsupported file type: {}", extension)),
         }
     }
 
@@ -374,6 +359,7 @@ impl AutoUpdaterPlugin {
             .args(["dpkg", "-i"])
             .arg(&deb_path)
             .output()
+            .await
             .map_err(|e| format!("Failed to install .deb: {}", e))?;
 
         if output.status.success() {
@@ -384,219 +370,6 @@ impl AutoUpdaterPlugin {
                 String::from_utf8_lossy(&output.stderr)
             ))
         }
-    }
-
-    /// Install from DMG file
-    async fn install_dmg(dmg_path: PathBuf) -> Result<(), String> {
-        // Mount the DMG
-        let mount_output = Command::new("hdiutil")
-            .args(["attach", "-nobrowse", "-readonly"])
-            .arg(&dmg_path)
-            .output()
-            .map_err(|e| format!("Failed to mount DMG: {}", e))?;
-
-        if !mount_output.status.success() {
-            let stderr = String::from_utf8_lossy(&mount_output.stderr);
-            return Err(format!("Failed to mount DMG: {}", stderr));
-        }
-
-        // Find mounted volume - parse hdiutil output
-        // Format: /dev/diskX    TYPE    /Volumes/Name
-        let mount_info = String::from_utf8_lossy(&mount_output.stdout);
-
-        // Look for the last line that contains /Volumes/ - this is the actual mount point
-        let volume_path = mount_info
-            .lines()
-            .rev() // Start from the end
-            .find_map(|line| {
-                // Split by tabs and whitespace, look for /Volumes/ entry
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    return None;
-                }
-
-                // The mount point is typically the last field after tabs
-                let parts: Vec<&str> = line.split('\t').collect();
-                for part in parts.iter().rev() {
-                    let trimmed_part = part.trim();
-                    if trimmed_part.starts_with("/Volumes/") {
-                        return Some(trimmed_part.to_string());
-                    }
-                }
-                None
-            })
-            .ok_or_else(|| {
-                format!(
-                    "Failed to find mount point in hdiutil output. Output was:\n{}",
-                    mount_info
-                )
-            })?;
-
-        // Verify the volume path exists
-        if !PathBuf::from(&volume_path).exists() {
-            return Err(format!(
-                "Mount point '{}' does not exist. Full output:\n{}",
-                volume_path, mount_info
-            ));
-        }
-
-        // Find .app bundle in the mounted volume
-        let app_bundle = Self::find_app_bundle(Path::new(&volume_path)).await?;
-
-        // Copy to /Applications
-        let app_name = app_bundle.file_name();
-        let dest = PathBuf::from("/Applications").join(&app_name);
-
-        // Remove existing app if present
-        if dest.exists() {
-            fs::remove_dir_all(&dest)
-                .await
-                .map_err(|e| format!("Failed to remove old app: {}", e))?;
-        }
-
-        // Copy new app
-        let copy_output = Command::new("cp")
-            .args(["-R"])
-            .arg(app_bundle.path())
-            .arg(&dest)
-            .output()
-            .map_err(|e| format!("Failed to copy app: {}", e))?;
-
-        // Unmount DMG
-        let detach_result = Command::new("hdiutil")
-            .args(["detach", &volume_path])
-            .output();
-
-        // Check if copy was successful first
-        if !copy_output.status.success() {
-            let stderr = String::from_utf8_lossy(&copy_output.stderr);
-            return Err(format!("Failed to copy app to Applications: {}", stderr));
-        }
-
-        // Log detach errors but don't fail the installation
-        if let Ok(output) = detach_result {
-            if !output.status.success() {
-                eprintln!(
-                    "Warning: Failed to detach DMG: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Install from tar.gz file
-    async fn install_tar_gz(tar_gz_path: PathBuf) -> Result<(), String> {
-        let extract_dir = tar_gz_path
-            .parent()
-            .ok_or_else(|| "Invalid tar.gz path".to_string())?;
-
-        // Extract tar.gz
-        let output = Command::new("tar")
-            .args(["-xzf"])
-            .arg(&tar_gz_path)
-            .arg("-C")
-            .arg(extract_dir)
-            .output()
-            .map_err(|e| format!("Failed to extract tar.gz: {}", e))?;
-
-        if !output.status.success() {
-            return Err("Failed to extract tar.gz".to_string());
-        }
-
-        // Find extracted .app bundle
-        let app_bundle = Self::find_app_bundle(extract_dir).await?;
-
-        // Copy to /Applications
-        let app_name = app_bundle.file_name();
-        let dest = PathBuf::from("/Applications").join(&app_name);
-
-        // Remove existing app if present
-        if dest.exists() {
-            fs::remove_dir_all(&dest)
-                .await
-                .map_err(|e| format!("Failed to remove old app: {}", e))?;
-        }
-
-        // Copy new app
-        let copy_output = Command::new("cp")
-            .args(["-R"])
-            .arg(app_bundle.path())
-            .arg(&dest)
-            .output()
-            .map_err(|e| format!("Failed to copy app: {}", e))?;
-
-        if copy_output.status.success() {
-            Ok(())
-        } else {
-            Err("Failed to copy app to Applications".to_string())
-        }
-    }
-
-    /// Install from zip file
-    async fn install_zip(zip_path: PathBuf) -> Result<(), String> {
-        let extract_dir = zip_path
-            .parent()
-            .ok_or_else(|| "Invalid zip path".to_string())?;
-
-        // Extract zip
-        let output = Command::new("unzip")
-            .args(["-o", "-q"])
-            .arg(&zip_path)
-            .arg("-d")
-            .arg(extract_dir)
-            .output()
-            .map_err(|e| format!("Failed to extract zip: {}", e))?;
-
-        if !output.status.success() {
-            return Err("Failed to extract zip".to_string());
-        }
-
-        // Find extracted .app bundle
-        let app_bundle = Self::find_app_bundle(extract_dir).await?;
-
-        // Copy to /Applications
-        let app_name = app_bundle.file_name();
-        let dest = PathBuf::from("/Applications").join(&app_name);
-
-        // Remove existing app if present
-        if dest.exists() {
-            fs::remove_dir_all(&dest)
-                .await
-                .map_err(|e| format!("Failed to remove old app: {}", e))?;
-        }
-
-        // Copy new app
-        let copy_output = Command::new("cp")
-            .args(["-R"])
-            .arg(app_bundle.path())
-            .arg(&dest)
-            .output()
-            .map_err(|e| format!("Failed to copy app: {}", e))?;
-
-        if copy_output.status.success() {
-            Ok(())
-        } else {
-            Err("Failed to copy app to Applications".to_string())
-        }
-    }
-
-    /// Find .app bundle in a directory
-    async fn find_app_bundle(dir_path: &Path) -> Result<fs::DirEntry, String> {
-        let mut read_dir = fs::read_dir(dir_path)
-            .await
-            .map_err(|e| format!("Failed to read directory '{}': {}", dir_path.display(), e))?;
-
-        while let Some(entry) = read_dir.next_entry().await.transpose() {
-            if let Ok(entry) = entry {
-                if entry.path().extension().and_then(|e| e.to_str()) == Some("app") {
-                    return Ok(entry);
-                }
-            }
-        }
-
-        Err(format!("No .app bundle found in '{}'", dir_path.display()))
     }
 
     /// Detect current OS
