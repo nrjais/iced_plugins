@@ -22,7 +22,7 @@ pub trait Plugin: Send + Sync + Debug {
     fn name(&self) -> &'static str;
 
     /// Initialize the plugin and return its initial state
-    fn init(&self) -> Self::State;
+    fn init(&self) -> (Self::State, Task<Self::Message>);
 
     /// Update the plugin state based on a message
     /// Returns a Task that can produce more messages and an optional output message
@@ -376,23 +376,17 @@ impl PluginManager {
 }
 
 impl PluginManager {
-    /// Install a plugin into the manager.
-    /// Returns a handle to the plugin that can be used to dispatch messages.
-    /// Plugins are driven in the order they are installed.
+    /// Internal method to install a plugin into the manager.
+    /// Returns the initial task for this plugin.
     ///
-    /// # Example
-    /// ```ignore
-    /// let mut manager = PluginManager::new();
-    /// let handle = manager.install(MyPlugin);
-    /// // Now use handle to dispatch messages to the plugin
-    /// ```
-    pub fn install<P>(&mut self, plugin: P) -> PluginHandle<P>
+    /// Users should use PluginManagerBuilder to install plugins instead.
+    fn install_internal<P>(&mut self, plugin: P) -> (PluginHandle<P>, Task<PluginMessage>)
     where
         P: Plugin + 'static,
     {
         let name = plugin.name();
         let plugin = Arc::new(plugin);
-        let state = plugin.init();
+        let (state, init_task) = plugin.init();
         let plugin_index = self.plugins.len();
         let message_type_id = TypeId::of::<P::Message>();
         let output_type_id = TypeId::of::<P::Output>();
@@ -424,7 +418,11 @@ impl PluginManager {
         };
 
         self.plugins.push(entry);
-        PluginHandle::new(plugin_index, Arc::clone(&self.output_registry))
+        let handle = PluginHandle::new(plugin_index, Arc::clone(&self.output_registry));
+        (
+            handle,
+            init_task.map(move |msg| PluginMessage::new(plugin_index, msg)),
+        )
     }
 
     /// Update the plugin manager with a plugin message.
@@ -442,25 +440,22 @@ impl PluginManager {
     pub fn update(&mut self, message: PluginMessage) -> Task<PluginMessage> {
         let plugin_index = message.plugin_index;
 
-        if let Some(entry) = self.plugins.get_mut(plugin_index) {
-            // Verify the message type matches the plugin
-            if entry.message_type_id == message.type_id {
-                let (task, output) =
-                    (entry.update_fn)(entry.state.as_mut(), Arc::clone(&message.message));
+        if let Some(entry) = self.plugins.get_mut(plugin_index)
+            && entry.message_type_id == message.type_id
+        {
+            let (task, output) =
+                (entry.update_fn)(entry.state.as_mut(), Arc::clone(&message.message));
 
-                // Send output to all subscribers via the output registry
-                if let Some(output) = output
-                    && let Ok(mut registry) = self.output_registry.lock()
-                    && let Some(senders) = registry.get_mut(&plugin_index)
-                {
-                    // Send to all subscribers and remove disconnected ones
-                    senders.retain(|sender| sender.unbounded_send(output.clone()).is_ok());
-                }
-
-                task
-            } else {
-                Task::none()
+            // Send output to all subscribers via the output registry
+            if let Some(output) = output
+                && let Ok(mut registry) = self.output_registry.lock()
+                && let Some(senders) = registry.get_mut(&plugin_index)
+            {
+                // Send to all subscribers and remove disconnected ones
+                senders.retain(|sender| sender.unbounded_send(output.clone()).is_ok());
             }
+
+            task
         } else {
             Task::none()
         }
@@ -540,37 +535,64 @@ impl PluginManager {
 }
 
 /// Builder pattern for constructing a PluginManager
+///
+/// This is the recommended way to set up plugins. It collects all initialization tasks
+/// and allows you to retrieve plugin handles after building.
+///
+/// # Example
+/// ```ignore
+/// let (plugins, init_task) = PluginManagerBuilder::new()
+///     .with_plugin(CounterPlugin)
+///     .with_plugin(TimerPlugin)
+///     .build();
+///
+/// // Retrieve handles after building
+/// let counter_handle = plugins.get_handle::<CounterPlugin>().unwrap();
+/// ```
 pub struct PluginManagerBuilder {
-    plugins: Vec<Box<dyn FnOnce(&mut PluginManager) + Send>>,
+    manager: PluginManager,
+    tasks: Vec<Task<PluginMessage>>,
 }
 
 impl PluginManagerBuilder {
     /// Create a new builder
     pub fn new() -> Self {
         Self {
-            plugins: Vec::new(),
+            manager: PluginManager::new(),
+            tasks: Vec::new(),
         }
     }
 
-    /// Add a plugin
+    /// Add a plugin to the builder
     pub fn with_plugin<P>(mut self, plugin: P) -> Self
     where
         P: Plugin + 'static,
     {
-        self.plugins
-            .push(Box::new(move |manager: &mut PluginManager| {
-                let _ = manager.install(plugin);
-            }));
+        let (_, task) = self.manager.install_internal(plugin);
+        self.tasks.push(task);
         self
     }
 
-    /// Build the plugin manager
-    pub fn build(self) -> PluginManager {
-        let mut manager: PluginManager = PluginManager::new();
-        for install_fn in self.plugins {
-            install_fn(&mut manager);
-        }
-        manager
+    /// Install a plugin and return a handle to it
+    pub fn install<P>(&mut self, plugin: P) -> PluginHandle<P>
+    where
+        P: Plugin + 'static,
+    {
+        let (handle, task) = self.manager.install_internal(plugin);
+        self.tasks.push(task);
+        handle
+    }
+
+    /// Build the plugin manager and return it with all batched init tasks
+    ///
+    /// Returns a tuple of (PluginManager, Task) where the task contains all
+    /// plugin initialization tasks batched together. Map this task to your
+    /// application's message type.
+    ///
+    /// After building, use `get_handle()` to retrieve handles to installed plugins.
+    pub fn build(self) -> (PluginManager, Task<PluginMessage>) {
+        let combined_task = Task::batch(self.tasks);
+        (self.manager, combined_task)
     }
 }
 

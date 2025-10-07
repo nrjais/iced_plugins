@@ -245,12 +245,13 @@ impl Plugin for WindowStatePlugin {
         "window_state"
     }
 
-    fn init(&self) -> Self::State {
-        WindowPluginState {
+    fn init(&self) -> (Self::State, Task<Self::Message>) {
+        let state = WindowPluginState {
             state: Self::load(&self.app_name).unwrap_or_default(),
             dirty: false,
             config_path: self.config_path.clone(),
-        }
+        };
+        (state, Task::none())
     }
 
     fn update(

@@ -2,11 +2,21 @@
 //!
 //! This example shows a complete end-to-end update flow:
 //! 1. Configure the auto updater plugin with automatic OS/arch detection
-//! 2. Check for updates from GitHub releases
-//! 3. Display available update information
-//! 4. Download the platform-specific asset
-//! 5. Verify SHA256 checksum
-//! 6. Install the update
+//! 2. Check for updates on startup (with check_on_start enabled)
+//! 3. Check for updates from GitHub releases
+//! 4. Display available update information
+//! 5. Download the platform-specific asset
+//! 6. Verify SHA256 checksum
+//! 7. Install the update
+//!
+//! Features demonstrated:
+//! - Automatic update checking on application start
+//! - Periodic update checks (every hour)
+//! - Manual update checks
+//! - Platform detection (OS and architecture)
+//! - Download progress tracking
+//! - SHA256 verification
+//! - Installation flow
 //!
 //! To run this example:
 //! ```sh
@@ -18,7 +28,7 @@ use iced::{Element, Fill, Length, Subscription, Task};
 use iced_auto_updater_plugin::{
     AutoUpdaterMessage, AutoUpdaterOutput, AutoUpdaterPlugin, ReleaseInfo, UpdaterConfig,
 };
-use iced_plugins::{PluginHandle, PluginManager, PluginMessage};
+use iced_plugins::{PluginHandle, PluginManager, PluginManagerBuilder, PluginMessage};
 
 const APP_NAME: &str = "auto_updater_example";
 const CURRENT_VERSION: &str = "0.1.0";
@@ -65,8 +75,6 @@ enum Message {
 
 impl App {
     fn new() -> (Self, Task<Message>) {
-        let mut plugins = PluginManager::new();
-
         // Detect current platform
         let os = detect_os();
         let arch = detect_arch();
@@ -76,9 +84,19 @@ impl App {
         // Replace with your actual GitHub repo
         let config = UpdaterConfig::new("nrjais", "sanchaar", CURRENT_VERSION)
             // Enable auto-check every hour (3600 seconds)
-            .with_auto_check(3600);
+            .with_auto_check(3600)
+            // Enable check on start - this will automatically check for updates when the app starts
+            .with_check_on_start(true);
 
-        let updater_handle = plugins.install(AutoUpdaterPlugin::new(APP_NAME.to_string(), config));
+        let check_on_start = config.check_on_start;
+
+        // Use the builder pattern to set up plugins
+        let (plugins, init_task) = PluginManagerBuilder::new()
+            .with_plugin(AutoUpdaterPlugin::new(APP_NAME.to_string(), config))
+            .build();
+
+        // Retrieve handle after building
+        let updater_handle = plugins.get_handle::<AutoUpdaterPlugin>().unwrap();
 
         let mut event_log = Vec::new();
         event_log.push(format!(
@@ -90,20 +108,33 @@ impl App {
             "📦 Will look for assets matching: {}",
             platform_info.to_lowercase()
         ));
-        event_log.push("✨ Ready to check for updates".to_string());
+
+        if check_on_start {
+            event_log.push("✨ Checking for updates on startup...".to_string());
+        } else {
+            event_log.push("✨ Ready to check for updates".to_string());
+        }
 
         (
             Self {
                 plugins,
                 updater_handle,
-                current_step: UpdateStep::Idle,
-                status_message: "Ready to check for updates".to_string(),
+                current_step: if check_on_start {
+                    UpdateStep::Checking
+                } else {
+                    UpdateStep::Idle
+                },
+                status_message: if check_on_start {
+                    "Checking for updates...".to_string()
+                } else {
+                    "Ready to check for updates".to_string()
+                },
                 available_update: None,
                 download_progress: 0.0,
                 event_log,
                 detected_platform: platform_info,
             },
-            Task::none(),
+            init_task.map(Message::Plugin),
         )
     }
 

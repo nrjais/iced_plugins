@@ -43,22 +43,25 @@ struct App {
 }
 
 impl App {
-    fn new() -> Self {
-        let mut plugins = PluginManager::new();
-
+    fn new() -> (Self, Task<Message>) {
         // Configure the auto updater
         let config = UpdaterConfig::new(
             "your-github-username",
             "your-repo-name",
             CURRENT_VERSION
         )
-        .with_auto_check(3600); // Check every hour
+        .with_auto_check(3600)      // Check every hour
+        .with_check_on_start(true); // Check on app start
 
-        let updater_handle = plugins.install(
-            AutoUpdaterPlugin::new(APP_NAME.to_string(), config)
-        );
+        // Use the builder pattern to set up plugins
+        let (plugins, init_task) = PluginManagerBuilder::new()
+            .with_plugin(AutoUpdaterPlugin::new(APP_NAME.to_string(), config))
+            .build();
 
-        Self { plugins, updater_handle }
+        // Retrieve handle after building
+        let updater_handle = plugins.get_handle::<AutoUpdaterPlugin>().unwrap();
+
+        (Self { plugins, updater_handle }, init_task.map(Message::Plugin))
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -107,7 +110,35 @@ Configure the auto updater with `UpdaterConfig`:
 
 ```rust
 let config = UpdaterConfig::new(owner, repo, current_version)
-    .with_auto_check(3600); // Auto-check interval in seconds (0 = disabled)
+    .with_auto_check(3600)      // Auto-check interval in seconds (0 = disabled)
+    .with_check_on_start(true); // Check for updates on application start
+```
+
+**Configuration options:**
+- `with_auto_check(interval_secs)` - Enable periodic update checks. Set to 0 to disable. For example, `3600` checks every hour.
+- `with_check_on_start(enabled)` - Check for updates when the application starts. Default is `false`.
+
+**Using check_on_start:**
+
+```rust
+impl App {
+    fn new() -> (Self, Task<Message>) {
+        let config = UpdaterConfig::new("owner", "repo", CURRENT_VERSION)
+            .with_check_on_start(true);  // Enable check on start
+
+        // The plugin's init method will automatically check for updates
+        // when check_on_start is enabled
+        let (plugins, init_task) = PluginManagerBuilder::new()
+            .with_plugin(AutoUpdaterPlugin::new(APP_NAME.to_string(), config))
+            .build();
+
+        // Retrieve handle after building
+        let updater_handle = plugins.get_handle::<AutoUpdaterPlugin>().unwrap();
+
+        // Map the init task to your app's message type
+        (Self { plugins, updater_handle }, init_task.map(Message::Plugin))
+    }
+}
 ```
 
 ### Asset Naming

@@ -1,7 +1,7 @@
 use iced::widget::{button, column, container, text};
 use iced::window::Position;
 use iced::{Element, Subscription, Task, window};
-use iced_plugins::{PluginHandle, PluginManager, PluginMessage};
+use iced_plugins::{PluginHandle, PluginManager, PluginManagerBuilder, PluginMessage};
 use iced_window_state_plugin::{WindowStateMessage, WindowStateOutput, WindowStatePlugin};
 const APP_NAME: &str = "window_state_plugin";
 
@@ -41,9 +41,13 @@ struct App {
 
 impl App {
     fn new() -> (Self, Task<Message>) {
-        let mut plugins = PluginManager::new();
+        // Use the builder pattern to set up plugins
+        let (plugins, init_task) = PluginManagerBuilder::new()
+            .with_plugin(WindowStatePlugin::new(APP_NAME.to_string()))
+            .build();
 
-        let window_handle = plugins.install(WindowStatePlugin::new(APP_NAME.to_string()));
+        // Retrieve handle after building
+        let window_handle = plugins.get_handle::<WindowStatePlugin>().unwrap();
 
         (
             App {
@@ -51,7 +55,7 @@ impl App {
                 window_handle,
                 count: 0,
             },
-            Task::none(),
+            init_task.map(From::from),
         )
     }
 

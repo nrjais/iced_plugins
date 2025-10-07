@@ -57,6 +57,8 @@ pub struct UpdaterConfig {
     pub current_version: String,
     /// Auto-check interval in seconds (0 = disabled)
     pub auto_check_interval: u64,
+    /// Check for updates on application start
+    pub check_on_start: bool,
 }
 
 impl UpdaterConfig {
@@ -71,12 +73,19 @@ impl UpdaterConfig {
             repo: repo.into(),
             current_version: current_version.into(),
             auto_check_interval: 0, // Disabled by default
+            check_on_start: false,  // Disabled by default
         }
     }
 
     /// Enable automatic update checking with specified interval
     pub fn with_auto_check(mut self, interval_secs: u64) -> Self {
         self.auto_check_interval = interval_secs;
+        self
+    }
+
+    /// Enable checking for updates on application start
+    pub fn with_check_on_start(mut self, enabled: bool) -> Self {
+        self.check_on_start = enabled;
         self
     }
 }
@@ -690,13 +699,29 @@ impl Plugin for AutoUpdaterPlugin {
         "auto_updater"
     }
 
-    fn init(&self) -> Self::State {
-        AutoUpdaterState {
+    fn init(&self) -> (Self::State, Task<Self::Message>) {
+        let state = AutoUpdaterState {
             download_progress: None,
             latest_release: None,
             is_updating: false,
             downloaded_file: None,
-        }
+        };
+
+        // Check for updates on start if enabled
+        let init_task = if self.config.check_on_start {
+            let owner = self.config.owner.clone();
+            let repo = self.config.repo.clone();
+            let current_version = self.config.current_version.clone();
+
+            Task::perform(
+                Self::check_for_updates(owner, repo, current_version),
+                AutoUpdaterMessage::UpdateCheckResult,
+            )
+        } else {
+            Task::none()
+        };
+
+        (state, init_task)
     }
 
     fn update(

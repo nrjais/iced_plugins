@@ -1,6 +1,6 @@
 use iced::widget::{button, column, container, text};
 use iced::{Element, Subscription, Task};
-use iced_plugins::{Plugin, PluginHandle, PluginManager, PluginMessage};
+use iced_plugins::{Plugin, PluginHandle, PluginManager, PluginManagerBuilder, PluginMessage};
 use std::time::Duration;
 
 fn main() -> iced::Result {
@@ -32,8 +32,8 @@ impl Plugin for CounterPlugin {
         "counter"
     }
 
-    fn init(&self) -> Self::State {
-        CounterState { value: 0 }
+    fn init(&self) -> (Self::State, iced::Task<Self::Message>) {
+        (CounterState { value: 0 }, iced::Task::none())
     }
 
     fn update(
@@ -81,8 +81,8 @@ impl Plugin for TimerPlugin {
         "timer"
     }
 
-    fn init(&self) -> Self::State {
-        TimerState { ticks: 0 }
+    fn init(&self) -> (Self::State, iced::Task<Self::Message>) {
+        (TimerState { ticks: 0 }, iced::Task::none())
     }
 
     fn update(
@@ -121,17 +121,21 @@ struct App {
 
 impl App {
     fn new() -> (Self, Task<Message>) {
-        let mut plugins = PluginManager::new();
+        // Use the builder pattern to set up plugins
+        let mut builder = PluginManagerBuilder::new()
+            .with_plugin(CounterPlugin)
+            .with_plugin(TimerPlugin);
 
-        let counter_handle = plugins.install(CounterPlugin);
-        let _ = plugins.install(TimerPlugin);
+        // Retrieve handles after building
+        let counter_handle = builder.install(CounterPlugin);
+        let (plugins, init_task) = builder.build();
 
         (
             App {
                 plugins,
                 counter_handle,
             },
-            Task::none(),
+            init_task.map(From::from),
         )
     }
 
