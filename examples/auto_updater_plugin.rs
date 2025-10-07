@@ -171,7 +171,7 @@ impl App {
                             "⬇️ Downloading: {:.1}% ({} / {} bytes)",
                             progress.percentage(),
                             progress.downloaded,
-                            progress.total
+                            progress.total_size
                         );
                     }
                     AutoUpdaterOutput::DownloadCompleted(path) => {

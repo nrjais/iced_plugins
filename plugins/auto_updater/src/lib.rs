@@ -37,6 +37,7 @@
 
 mod macos;
 
+use iced::task::{Straw, sipper};
 use iced::time::every;
 use iced::{Subscription, Task};
 use iced_plugins::Plugin;
@@ -114,15 +115,15 @@ pub struct ReleaseAsset {
 #[derive(Debug, Clone)]
 pub struct DownloadProgress {
     pub downloaded: u64,
-    pub total: u64,
+    pub total_size: u64,
 }
 
 impl DownloadProgress {
     pub fn percentage(&self) -> f32 {
-        if self.total == 0 {
+        if self.total_size == 0 {
             0.0
         } else {
-            (self.downloaded as f32 / self.total as f32) * 100.0
+            (self.downloaded as f32 / self.total_size as f32) * 100.0
         }
     }
 }
@@ -164,6 +165,8 @@ pub enum AutoUpdaterOutput {
     DownloadProgress(DownloadProgress),
     /// Download completed
     DownloadCompleted(PathBuf),
+    /// Download Failed
+    DownloadFailed(String),
     /// Verification succeeded
     VerificationSucceeded(PathBuf),
     /// Verification failed
@@ -187,6 +190,8 @@ pub struct AutoUpdaterState {
     pub is_updating: bool,
     /// Downloaded file path
     pub downloaded_file: Option<PathBuf>,
+    /// Abort handle of the download task
+    pub abort_handle: Option<iced::task::Handle>,
 }
 
 /// Auto updater plugin
@@ -252,54 +257,66 @@ impl AutoUpdaterPlugin {
         }
     }
 
-    /// Download a file with progress tracking
-    async fn download_file(url: String, dest_path: PathBuf) -> Result<PathBuf, String> {
-        use futures_util::stream::StreamExt;
+    fn download_file(
+        url: String,
+        dest_path: PathBuf,
+    ) -> impl Straw<PathBuf, DownloadProgress, String> {
+        sipper(move |mut progress| async move {
+            use futures_util::stream::StreamExt;
 
-        let client = reqwest::Client::new();
-        let response = client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| format!("Failed to download: {}", e))?;
-
-        if !response.status().is_success() {
-            return Err(format!(
-                "Download failed with status: {}",
-                response.status()
-            ));
-        }
-
-        let _total_size = response.content_length().unwrap_or(0);
-
-        if let Some(parent) = dest_path.parent() {
-            fs::create_dir_all(parent)
+            let client = reqwest::Client::new();
+            let response = client
+                .get(&url)
+                .send()
                 .await
-                .map_err(|e| format!("Failed to create download directory: {}", e))?;
-        }
+                .map_err(|e| format!("Failed to download: {}", e))?;
 
-        let mut file = fs::File::create(&dest_path)
-            .await
-            .map_err(|e| format!("Failed to create file: {}", e))?;
+            if !response.status().is_success() {
+                return Err(format!(
+                    "Download failed with status: {}",
+                    response.status()
+                ));
+            }
 
-        let mut stream = response.bytes_stream();
-        let mut _downloaded: u64 = 0;
+            let total_size = response
+                .content_length()
+                .ok_or_else(|| format!("Failed to get content length"))?;
 
-        while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result.map_err(|e| format!("Failed to read chunk: {}", e))?;
+            if let Some(parent) = dest_path.parent() {
+                fs::create_dir_all(parent)
+                    .await
+                    .map_err(|e| format!("Failed to create download directory: {}", e))?;
+            }
 
-            file.write_all(&chunk)
+            let mut file = fs::File::create(&dest_path)
                 .await
-                .map_err(|e| format!("Failed to write chunk: {}", e))?;
+                .map_err(|e| format!("Failed to create file: {}", e))?;
 
-            _downloaded += chunk.len() as u64;
-        }
+            let mut stream = response.bytes_stream();
+            let mut downloaded: u64 = 0;
 
-        file.flush()
-            .await
-            .map_err(|e| format!("Failed to flush file: {}", e))?;
+            while let Some(chunk_result) = stream.next().await {
+                let chunk = chunk_result.map_err(|e| format!("Failed to read chunk: {}", e))?;
 
-        Ok(dest_path)
+                file.write_all(&chunk)
+                    .await
+                    .map_err(|e| format!("Failed to write chunk: {}", e))?;
+
+                downloaded += chunk.len() as u64;
+                let _ = progress
+                    .send(DownloadProgress {
+                        downloaded,
+                        total_size,
+                    })
+                    .await;
+            }
+
+            file.flush()
+                .await
+                .map_err(|e| format!("Failed to flush file: {}", e))?;
+
+            Ok(dest_path)
+        })
     }
 
     /// Download SHA256 checksum file
@@ -485,6 +502,7 @@ impl Plugin for AutoUpdaterPlugin {
             latest_release: None,
             is_updating: false,
             downloaded_file: None,
+            abort_handle: None,
         };
 
         let init_task = if self.config.check_on_start {
@@ -543,10 +561,13 @@ impl Plugin for AutoUpdaterPlugin {
                     let dest_path = download_dir.join(&asset.name);
                     let url = asset.browser_download_url.clone();
 
-                    let task = Task::perform(
+                    let (task, handle) = Task::sip(
                         Self::download_file(url, dest_path),
+                        AutoUpdaterMessage::DownloadProgress,
                         AutoUpdaterMessage::DownloadCompleted,
-                    );
+                    )
+                    .abortable();
+                    state.abort_handle = Some(handle.abort_on_drop());
 
                     (task, Some(AutoUpdaterOutput::DownloadStarted(release)))
                 } else {
@@ -588,7 +609,7 @@ impl Plugin for AutoUpdaterPlugin {
                             state.downloaded_file = None;
                             return (
                                 Task::none(),
-                                Some(AutoUpdaterOutput::Error(format!(
+                                Some(AutoUpdaterOutput::DownloadFailed(format!(
                                     "SHA256 checksum file not found for {}. Verification is required.",
                                     file_name
                                 ))),
