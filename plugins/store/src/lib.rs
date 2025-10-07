@@ -314,25 +314,25 @@ impl Plugin for StorePlugin {
             }
 
             StoreMessage::Delete { group, key } => {
-                if let Some(group_data) = state.store.get_mut(&group) {
-                    if group_data.remove(&key).is_some() {
-                        let data = group_data.clone();
-                        let path = state.group_path(&group);
-                        let group_clone = group.clone();
+                if let Some(group_data) = state.store.get_mut(&group)
+                    && group_data.remove(&key).is_some()
+                {
+                    let data = group_data.clone();
+                    let path = state.group_path(&group);
+                    let group_clone = group.clone();
 
-                        let task = Task::perform(
-                            async move {
-                                let success = Self::save_group(path, data).await.is_ok();
-                                StoreMessage::SaveResult {
-                                    group: group_clone,
-                                    success,
-                                }
-                            },
-                            std::convert::identity,
-                        );
+                    let task = Task::perform(
+                        async move {
+                            let success = Self::save_group(path, data).await.is_ok();
+                            StoreMessage::SaveResult {
+                                group: group_clone,
+                                success,
+                            }
+                        },
+                        std::convert::identity,
+                    );
 
-                        return (task, Some(StoreOutput::Deleted { group, key }));
-                    }
+                    return (task, Some(StoreOutput::Deleted { group, key }));
                 }
 
                 (Task::none(), Some(StoreOutput::NotFound { group, key }))

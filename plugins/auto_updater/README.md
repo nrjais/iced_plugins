@@ -5,7 +5,7 @@ An automatic update plugin for Iced applications that checks for updates from Gi
 ## Features
 
 - Check for updates from GitHub releases with automatic OS and architecture detection
-- Download and verify release assets with SHA256 checksums
+- Download and verify release assets with **required** SHA256 checksum verification
 - Install updates on macOS (.dmg, .tar.gz, .zip) and Linux (.deb)
 - Progress tracking for downloads
 - Configurable automatic or manual update checks
@@ -44,3 +44,17 @@ Your GitHub releases should include:
 1. Tagged releases (e.g., `v1.0.0`)
 2. Platform-specific bundles with OS and architecture in the filename (e.g., `myapp-macos-aarch64-v1.0.0.tar.gz`)
 3. SHA256 checksum files for each bundle with `.sha256` extension
+
+### Creating SHA256 Checksums
+
+Generate checksum files for your release assets:
+
+```bash
+# macOS/Linux
+shasum -a 256 myapp-macos-aarch64.dmg > myapp-macos-aarch64.dmg.sha256
+
+# Or use sha256sum on Linux
+sha256sum myapp-linux-x86_64.deb > myapp-linux-x86_64.deb.sha256
+```
+
+The `.sha256` file should contain only the hash and filename on a single line.

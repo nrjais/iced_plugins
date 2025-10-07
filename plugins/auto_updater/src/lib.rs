@@ -8,7 +8,7 @@
 //! - Check for updates from GitHub releases
 //! - Automatic OS and architecture detection
 //! - Download release assets
-//! - Verify SHA256 checksums
+//! - **Required** SHA256 checksum verification for security
 //! - Install macOS bundles (.dmg, .tar.gz, .zip)
 //! - Install Linux packages (.deb for Debian/Ubuntu)
 //! - Progress tracking for downloads
@@ -142,6 +142,8 @@ pub enum AutoUpdaterMessage {
     DownloadCompleted(Result<PathBuf, String>),
     /// SHA256 verification result
     VerificationResult(Result<PathBuf, String>),
+    /// Start installation
+    StartInstallation(PathBuf),
     /// Installation result
     InstallationResult(Result<(), String>),
     /// Auto-check timer tick
@@ -252,6 +254,8 @@ impl AutoUpdaterPlugin {
 
     /// Download a file with progress tracking
     async fn download_file(url: String, dest_path: PathBuf) -> Result<PathBuf, String> {
+        use futures_util::stream::StreamExt;
+
         let client = reqwest::Client::new();
         let response = client
             .get(&url)
@@ -266,24 +270,34 @@ impl AutoUpdaterPlugin {
             ));
         }
 
+        let _total_size = response.content_length().unwrap_or(0);
+
         if let Some(parent) = dest_path.parent() {
             fs::create_dir_all(parent)
                 .await
                 .map_err(|e| format!("Failed to create download directory: {}", e))?;
         }
 
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|e| format!("Failed to read response: {}", e))?;
-
         let mut file = fs::File::create(&dest_path)
             .await
             .map_err(|e| format!("Failed to create file: {}", e))?;
 
-        file.write_all(&bytes)
+        let mut stream = response.bytes_stream();
+        let mut _downloaded: u64 = 0;
+
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result.map_err(|e| format!("Failed to read chunk: {}", e))?;
+
+            file.write_all(&chunk)
+                .await
+                .map_err(|e| format!("Failed to write chunk: {}", e))?;
+
+            _downloaded += chunk.len() as u64;
+        }
+
+        file.flush()
             .await
-            .map_err(|e| format!("Failed to write file: {}", e))?;
+            .map_err(|e| format!("Failed to flush file: {}", e))?;
 
         Ok(dest_path)
     }
@@ -551,32 +565,45 @@ impl Plugin for AutoUpdaterPlugin {
                 Ok(path) => {
                     state.downloaded_file = Some(path.clone());
 
-                    if let Some(release) = &state.latest_release {
-                        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                            if let Some(sha256_asset) = self.find_sha256_asset(release, file_name) {
-                                let file_path = path.clone();
-                                let sha256_url = sha256_asset.browser_download_url.clone();
+                    let output = Some(AutoUpdaterOutput::DownloadCompleted(path.clone()));
 
-                                let task = Task::perform(
-                                    async move {
-                                        let expected_hash =
-                                            Self::download_sha256(sha256_url).await?;
-                                        Self::verify_sha256(file_path, expected_hash).await
-                                    },
-                                    AutoUpdaterMessage::VerificationResult,
-                                );
+                    if let Some(release) = &state.latest_release
+                        && let Some(file_name) = path.file_name().and_then(|n| n.to_str())
+                    {
+                        if let Some(sha256_asset) = self.find_sha256_asset(release, file_name) {
+                            let file_path = path.clone();
+                            let sha256_url = sha256_asset.browser_download_url.clone();
 
-                                return (task, None);
-                            }
+                            let task = Task::perform(
+                                async move {
+                                    let expected_hash = Self::download_sha256(sha256_url).await?;
+                                    Self::verify_sha256(file_path, expected_hash).await
+                                },
+                                AutoUpdaterMessage::VerificationResult,
+                            );
+
+                            return (task, output);
+                        } else {
+                            state.is_updating = false;
+                            state.downloaded_file = None;
+                            return (
+                                Task::none(),
+                                Some(AutoUpdaterOutput::Error(format!(
+                                    "SHA256 checksum file not found for {}. Verification is required.",
+                                    file_name
+                                ))),
+                            );
                         }
                     }
 
-                    let task = Task::perform(
-                        Self::install(path.clone()),
-                        AutoUpdaterMessage::InstallationResult,
-                    );
-
-                    (task, Some(AutoUpdaterOutput::DownloadCompleted(path)))
+                    state.is_updating = false;
+                    state.downloaded_file = None;
+                    (
+                        Task::none(),
+                        Some(AutoUpdaterOutput::Error(
+                            "Unable to verify download: missing release information".to_string(),
+                        )),
+                    )
                 }
                 Err(e) => {
                     state.is_updating = false;
@@ -585,20 +612,23 @@ impl Plugin for AutoUpdaterPlugin {
             },
 
             AutoUpdaterMessage::VerificationResult(result) => match result {
-                Ok(path) => {
-                    let task = Task::perform(
-                        Self::install(path.clone()),
-                        AutoUpdaterMessage::InstallationResult,
-                    );
-
-                    (task, Some(AutoUpdaterOutput::VerificationSucceeded(path)))
-                }
+                Ok(path) => (
+                    Task::done(AutoUpdaterMessage::StartInstallation(path.clone())),
+                    Some(AutoUpdaterOutput::VerificationSucceeded(path)),
+                ),
                 Err(e) => {
                     state.is_updating = false;
                     state.downloaded_file = None;
                     (Task::none(), Some(AutoUpdaterOutput::VerificationFailed(e)))
                 }
             },
+
+            AutoUpdaterMessage::StartInstallation(path) => {
+                let task =
+                    Task::perform(Self::install(path), AutoUpdaterMessage::InstallationResult);
+
+                (task, Some(AutoUpdaterOutput::InstallationStarted))
+            }
 
             AutoUpdaterMessage::InstallationResult(result) => {
                 state.is_updating = false;
