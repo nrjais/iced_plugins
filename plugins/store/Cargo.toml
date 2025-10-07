@@ -1,8 +1,8 @@
 [package]
-name = "iced_pref_store_plugin"
+name = "iced_store_plugin"
 version = "0.1.0"
 edition = "2024"
-description = "A simple, type-safe preference store plugin for Iced applications"
+description = "A simple JSON-based store plugin for Iced applications"
 license = "MIT OR Apache-2.0"
 
 [dependencies]

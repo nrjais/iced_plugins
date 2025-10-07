@@ -1,15 +1,15 @@
-//! Example demonstrating the Preference Store Plugin
+//! Example demonstrating the Store Plugin
 //!
-//! This example shows how to use the preference store plugin to persist
-//! application data with type safety and group organization.
+//! This example shows how to use the store plugin to persist
+//! application data with group organization.
 
 use iced::widget::{button, column, container, row, text, text_input};
 use iced::{Element, Length, Task};
 use iced_plugins::{PluginHandle, PluginManager, PluginMessage};
-use iced_pref_store_plugin::{PrefMessage, PrefOutput, PrefStorePlugin};
+use iced_store_plugin::{StoreMessage, StoreOutput, StorePlugin};
 use serde::{Deserialize, Serialize};
 
-const APP_NAME: &str = "pref_store_example";
+const APP_NAME: &str = "store_example";
 
 fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -17,14 +17,14 @@ fn main() -> iced::Result {
         .run()
 }
 
-/// User preferences structure
+/// User data structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct UserPrefs {
+struct UserData {
     theme: String,
     font_size: u32,
 }
 
-impl Default for UserPrefs {
+impl Default for UserData {
     fn default() -> Self {
         Self {
             theme: "light".to_string(),
@@ -36,10 +36,10 @@ impl Default for UserPrefs {
 /// Application state
 struct App {
     plugins: PluginManager,
-    pref_handle: PluginHandle<PrefStorePlugin>,
+    store_handle: PluginHandle<StorePlugin>,
 
     // UI state
-    user_prefs: UserPrefs,
+    user_data: UserData,
 
     // Input fields
     theme_input: String,
@@ -51,34 +51,34 @@ struct App {
 #[derive(Debug, Clone)]
 enum Message {
     Plugin(PluginMessage),
-    PrefOutput(PrefOutput),
+    StoreOutput(StoreOutput),
 
-    // Preferences actions
+    // Data actions
     ThemeInputChanged(String),
     FontSizeInputChanged(String),
-    SavePreferences,
-    LoadPreferences,
-    DeletePreferences,
+    SaveData,
+    LoadData,
+    DeleteData,
 }
 
 impl App {
     fn new() -> (App, Task<Message>) {
         let mut builder = iced_plugins::PluginManagerBuilder::new();
-        let pref_handle = builder.install(PrefStorePlugin::new(APP_NAME));
+        let store_handle = builder.install(StorePlugin::new(APP_NAME));
         let (plugins, init_task) = builder.build();
 
         let app = App {
             plugins,
-            pref_handle: pref_handle.clone(),
-            user_prefs: UserPrefs::default(),
+            store_handle: store_handle.clone(),
+            user_data: UserData::default(),
             theme_input: "light".to_string(),
             font_size_input: "14".to_string(),
             status_message: "Ready".to_string(),
         };
 
-        // Auto-load preferences on startup
-        let load_task = pref_handle
-            .dispatch(PrefMessage::get("ui", "user"))
+        // Auto-load data on startup
+        let load_task = store_handle
+            .dispatch(StoreMessage::get("ui", "user"))
             .map(Message::Plugin);
 
         (
@@ -93,33 +93,33 @@ impl App {
                 return self.plugins.update(plugin_msg).map(Message::Plugin);
             }
 
-            Message::PrefOutput(output) => match output {
-                PrefOutput::Get { ref key, .. } if key == "user" => {
-                    if let Some(prefs) = output.as_value::<UserPrefs>() {
-                        self.user_prefs = prefs.clone();
-                        self.theme_input = prefs.theme;
-                        self.font_size_input = prefs.font_size.to_string();
-                        self.status_message = "Preferences loaded".to_string();
+            Message::StoreOutput(output) => match output {
+                StoreOutput::Get { ref key, .. } if key == "user" => {
+                    if let Some(data) = output.as_value::<UserData>() {
+                        self.user_data = data.clone();
+                        self.theme_input = data.theme;
+                        self.font_size_input = data.font_size.to_string();
+                        self.status_message = "Data loaded".to_string();
                     }
                 }
 
-                PrefOutput::Set { group, key } => {
+                StoreOutput::Set { group, key } => {
                     self.status_message = format!("Saved {}/{}", group, key);
                 }
 
-                PrefOutput::Deleted { group, key } => {
+                StoreOutput::Deleted { group, key } => {
                     self.status_message = format!("Deleted {}/{}", group, key);
                     // Reset to defaults
-                    self.user_prefs = UserPrefs::default();
-                    self.theme_input = self.user_prefs.theme.clone();
-                    self.font_size_input = self.user_prefs.font_size.to_string();
+                    self.user_data = UserData::default();
+                    self.theme_input = self.user_data.theme.clone();
+                    self.font_size_input = self.user_data.font_size.to_string();
                 }
 
-                PrefOutput::NotFound { key, .. } => {
+                StoreOutput::NotFound { key, .. } => {
                     self.status_message = format!("'{}' not found, using defaults", key);
                 }
 
-                PrefOutput::Error { message } => {
+                StoreOutput::Error { message } => {
                     self.status_message = format!("Error: {}", message);
                 }
 
@@ -134,34 +134,34 @@ impl App {
                 self.font_size_input = value;
             }
 
-            Message::SavePreferences => {
+            Message::SaveData => {
                 if let Ok(font_size) = self.font_size_input.parse::<u32>() {
-                    let prefs = UserPrefs {
+                    let data = UserData {
                         theme: self.theme_input.clone(),
                         font_size,
                     };
-                    self.user_prefs = prefs.clone();
+                    self.user_data = data.clone();
 
                     return self
-                        .pref_handle
-                        .dispatch(PrefMessage::set("ui", "user", prefs))
+                        .store_handle
+                        .dispatch(StoreMessage::set("ui", "user", data))
                         .map(Message::Plugin);
                 } else {
                     self.status_message = "Invalid font size".to_string();
                 }
             }
 
-            Message::LoadPreferences => {
+            Message::LoadData => {
                 return self
-                    .pref_handle
-                    .dispatch(PrefMessage::get("ui", "user"))
+                    .store_handle
+                    .dispatch(StoreMessage::get("ui", "user"))
                     .map(Message::Plugin);
             }
 
-            Message::DeletePreferences => {
+            Message::DeleteData => {
                 return self
-                    .pref_handle
-                    .dispatch(PrefMessage::delete("ui", "user"))
+                    .store_handle
+                    .dispatch(StoreMessage::delete("ui", "user"))
                     .map(Message::Plugin);
             }
         }
@@ -170,14 +170,14 @@ impl App {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let title = text("Preference Store Plugin Example").size(32);
+        let title = text("Store Plugin Example").size(32);
 
         let status = text(format!("Status: {}", self.status_message)).size(14);
 
-        // Current preferences display
-        let current_prefs = text(format!(
+        // Current data display
+        let current_data = text(format!(
             "Current: theme={}, font_size={}",
-            self.user_prefs.theme, self.user_prefs.font_size
+            self.user_data.theme, self.user_data.font_size
         ));
 
         // Theme input
@@ -200,9 +200,9 @@ impl App {
 
         // Action buttons
         let buttons = row![
-            button("Save").on_press(Message::SavePreferences),
-            button("Load").on_press(Message::LoadPreferences),
-            button("Delete").on_press(Message::DeletePreferences),
+            button("Save").on_press(Message::SaveData),
+            button("Load").on_press(Message::LoadData),
+            button("Delete").on_press(Message::DeleteData),
         ]
         .spacing(10);
 
@@ -210,7 +210,7 @@ impl App {
             title,
             status,
             text("").size(10),
-            current_prefs,
+            current_data,
             text("").size(10),
             theme_input,
             font_size_input,
@@ -230,6 +230,6 @@ impl App {
 fn subscription(app: &App) -> iced::Subscription<Message> {
     iced::Subscription::batch([
         app.plugins.subscriptions().map(Message::Plugin),
-        app.pref_handle.listen().map(Message::PrefOutput),
+        app.store_handle.listen().map(Message::StoreOutput),
     ])
 }

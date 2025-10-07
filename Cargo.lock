@@ -1556,22 +1556,10 @@ dependencies = [
  "directories",
  "iced",
  "iced_auto_updater_plugin",
- "iced_pref_store_plugin",
+ "iced_store_plugin",
  "iced_window_state_plugin",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "iced_pref_store_plugin"
-version = "0.1.0"
-dependencies = [
- "directories",
- "iced",
- "iced_plugins",
- "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -1606,6 +1594,18 @@ dependencies = [
  "iced_futures",
  "raw-window-handle",
  "thiserror 2.0.17",
+]
+
+[[package]]
+name = "iced_store_plugin"
+version = "0.1.0"
+dependencies = [
+ "directories",
+ "iced",
+ "iced_plugins",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

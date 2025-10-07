@@ -1,20 +1,20 @@
-# Preference Store Plugin for Iced
+# Store Plugin for Iced
 
-A simple JSON-based preference store plugin for Iced applications that automatically persists data to disk.
+A simple JSON-based store plugin for Iced applications that automatically persists data to disk.
 
 ## Features
 
 - **Simple API**: Just get, set, and delete operations
 - **Auto-save**: Changes are automatically persisted to disk
-- **Group-based**: Organize preferences into logical groups
+- **Group-based**: Organize data into logical groups
 - **JSON storage**: Human-readable JSON files
 - **Async operations**: Non-blocking file I/O
 
 ## Example
 
 ```rust
-use iced_pref_store_plugin::{PrefStorePlugin, PrefMessage};
-use iced_plugins::PluginManager;
+use iced_store_plugin::{StorePlugin, StoreMessage};
+use iced_plugins::PluginManagerBuilder;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,23 +28,23 @@ const APP_NAME: &str = "my_app";
 fn main() -> iced::Result {
     let mut builder = PluginManagerBuilder::new();
 
-    // Install the preference store plugin
-    let pref_handle = builder.install(PrefStorePlugin::new(APP_NAME));
+    // Install the store plugin
+    let store_handle = builder.install(StorePlugin::new(APP_NAME));
     let (plugins, init_task) = builder.build();
 
-    // Set a preference
+    // Set a value
     let prefs = UserPrefs {
         theme: "dark".to_string(),
         font_size: 14,
     };
 
-    pref_handle.dispatch(PrefMessage::set("ui", "user", prefs));
+    store_handle.dispatch(StoreMessage::set("ui", "user", prefs));
 
-    // Get a preference
-    pref_handle.dispatch(PrefMessage::get("ui", "user"));
+    // Get a value
+    store_handle.dispatch(StoreMessage::get("ui", "user"));
 
-    // Delete a preference
-    pref_handle.dispatch(PrefMessage::delete("ui", "user"));
+    // Delete a value
+    store_handle.dispatch(StoreMessage::delete("ui", "user"));
 
     iced::application(App::new, App::update, App::view).run()
 }
@@ -52,10 +52,10 @@ fn main() -> iced::Result {
 
 ## Storage
 
-Preferences are stored in JSON files organized by group:
+Data is stored in JSON files organized by group:
 
 ```
-~/.config/{app_name}/prefs/
+~/.config/{app_name}/store/
   ├── ui.json
   ├── settings.json
   └── cache.json
@@ -67,56 +67,56 @@ Preferences are stored in JSON files organized by group:
 
 ```rust
 let mut builder = PluginManagerBuilder::new();
-let pref_handle = builder.install(PrefStorePlugin::new("my_app"));
+let store_handle = builder.install(StorePlugin::new("my_app"));
 let (plugins, init_task) = builder.build();
 ```
 
 ### Messages
 
-- **`PrefMessage::set(group, key, value)`** - Store a preference
+- **`StoreMessage::set(group, key, value)`** - Store a value
   ```rust
-  pref_handle.dispatch(PrefMessage::set("ui", "theme", "dark"));
+  store_handle.dispatch(StoreMessage::set("ui", "theme", "dark"));
   ```
 
-- **`PrefMessage::get(group, key)`** - Retrieve a preference
+- **`StoreMessage::get(group, key)`** - Retrieve a value
   ```rust
-  pref_handle.dispatch(PrefMessage::get("ui", "theme"));
+  store_handle.dispatch(StoreMessage::get("ui", "theme"));
   ```
 
-- **`PrefMessage::delete(group, key)`** - Delete a preference
+- **`StoreMessage::delete(group, key)`** - Delete a value
   ```rust
-  pref_handle.dispatch(PrefMessage::delete("ui", "theme"));
+  store_handle.dispatch(StoreMessage::delete("ui", "theme"));
   ```
 
 ### Outputs
 
-Handle preference store outputs in your subscription:
+Handle store outputs in your subscription:
 
 ```rust
 fn subscription(app: &App) -> iced::Subscription<Message> {
     iced::Subscription::batch([
         app.plugins.subscriptions().map(Message::Plugin),
-        app.pref_handle.listen().map(Message::PrefOutput),
+        app.store_handle.listen().map(Message::StoreOutput),
     ])
 }
 ```
 
 Output variants:
-- **`PrefOutput::Set { group, key }`** - A preference was stored
-- **`PrefOutput::Get { group, key, value }`** - A preference was retrieved
-- **`PrefOutput::NotFound { group, key }`** - A preference was not found
-- **`PrefOutput::Deleted { group, key }`** - A preference was deleted
-- **`PrefOutput::Error { message }`** - An error occurred
+- **`StoreOutput::Set { group, key }`** - A value was stored
+- **`StoreOutput::Get { group, key, value }`** - A value was retrieved
+- **`StoreOutput::NotFound { group, key }`** - A value was not found
+- **`StoreOutput::Deleted { group, key }`** - A value was deleted
+- **`StoreOutput::Error { message }`** - An error occurred
 
 ### Deserializing Values
 
-Use the `as_value` helper to deserialize retrieved preferences:
+Use the `as_value` helper to deserialize retrieved values:
 
 ```rust
 match output {
-    PrefOutput::Get { .. } => {
+    StoreOutput::Get { .. } => {
         if let Some(prefs) = output.as_value::<UserPrefs>() {
-            // Use the deserialized preferences
+            // Use the deserialized value
             println!("Theme: {}", prefs.theme);
         }
     }

@@ -1,7 +1,7 @@
-//! Preference Store Plugin for Iced
+//! Store Plugin for Iced
 //!
-//! A simple JSON-based preference store plugin that persists data to disk.
-//! Each preference group is stored in a separate JSON file.
+//! A simple JSON-based store plugin that persists data to disk.
+//! Each group is stored in a separate JSON file.
 //!
 //! # Features
 //!
@@ -13,7 +13,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use iced_pref_store_plugin::{PrefStorePlugin, PrefMessage};
+//! use iced_store_plugin::{StorePlugin, StoreMessage};
 //! use serde::{Deserialize, Serialize};
 //!
 //! #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,18 +26,18 @@
 //!
 //! fn main() -> iced::Result {
 //!     let mut builder = PluginManagerBuilder::new();
-//!     let pref_handle = builder.install(PrefStorePlugin::new(APP_NAME));
+//!     let store_handle = builder.install(StorePlugin::new(APP_NAME));
 //!     let (plugins, init_task) = builder.build();
 //!
-//!     // Set a preference
+//!     // Set a value
 //!     let prefs = UserPrefs {
 //!         theme: "dark".to_string(),
 //!         font_size: 14,
 //!     };
-//!     pref_handle.dispatch(PrefMessage::set("ui", "user", prefs));
+//!     store_handle.dispatch(StoreMessage::set("ui", "user", prefs));
 //!
-//!     // Get a preference
-//!     pref_handle.dispatch(PrefMessage::get("ui", "user"));
+//!     // Get a value
+//!     store_handle.dispatch(StoreMessage::get("ui", "user"));
 //!
 //!     iced::application(App::new, App::update, App::view).run()
 //! }
@@ -50,18 +50,18 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::fs;
 
-/// Messages that the preference store plugin handles
+/// Messages that the store plugin handles
 #[derive(Clone, Debug)]
-pub enum PrefMessage {
-    /// Set a preference value
+pub enum StoreMessage {
+    /// Set a value
     Set {
         group: String,
         key: String,
         value: String,
     },
-    /// Get a preference value
+    /// Get a value
     Get { group: String, key: String },
-    /// Delete a preference
+    /// Delete a value
     Delete { group: String, key: String },
     /// Internal: result of a get operation
     GetResult {
@@ -73,7 +73,7 @@ pub enum PrefMessage {
     SaveResult { group: String, success: bool },
 }
 
-impl PrefMessage {
+impl StoreMessage {
     /// Create a Set message with serialization
     pub fn set<T>(group: impl Into<String>, key: impl Into<String>, value: T) -> Self
     where
@@ -108,9 +108,9 @@ impl PrefMessage {
     }
 }
 
-/// Output messages emitted by the preference store plugin
+/// Output messages emitted by the store plugin
 #[derive(Clone, Debug)]
-pub enum PrefOutput {
+pub enum StoreOutput {
     /// A value was set
     Set { group: String, key: String },
     /// A value was retrieved
@@ -127,11 +127,11 @@ pub enum PrefOutput {
     Error { message: String },
 }
 
-impl PrefOutput {
+impl StoreOutput {
     /// Try to deserialize a retrieved value
     pub fn as_value<T: DeserializeOwned>(&self) -> Option<T> {
         match self {
-            PrefOutput::Get { value, .. } => serde_json::from_str(value).ok(),
+            StoreOutput::Get { value, .. } => serde_json::from_str(value).ok(),
             _ => None,
         }
     }
@@ -139,28 +139,28 @@ impl PrefOutput {
 
 /// The plugin state held by the PluginManager
 #[derive(Debug)]
-pub struct PrefStoreState {
+pub struct StoreState {
     /// In-memory store organized by group
     store: HashMap<String, HashMap<String, String>>,
     /// Base directory for storage
     storage_dir: PathBuf,
 }
 
-impl PrefStoreState {
+impl StoreState {
     /// Get the storage path for a group
     fn group_path(&self, group: &str) -> PathBuf {
         self.storage_dir.join(format!("{}.json", group))
     }
 }
 
-/// Preference store plugin that manages persistent key-value storage
+/// Store plugin that manages persistent key-value storage
 #[derive(Clone, Debug)]
-pub struct PrefStorePlugin {
+pub struct StorePlugin {
     storage_dir: PathBuf,
 }
 
-impl PrefStorePlugin {
-    /// Create a new preference store plugin
+impl StorePlugin {
+    /// Create a new store plugin
     pub fn new(app_name: impl Into<String>) -> Self {
         let storage_dir = Self::storage_dir(&app_name.into());
         Self { storage_dir }
@@ -172,7 +172,7 @@ impl PrefStorePlugin {
             .map(|dirs| dirs.config_local_dir().to_path_buf())
             .unwrap_or_else(|| PathBuf::from("."))
             .join(app_name)
-            .join("prefs")
+            .join("store")
     }
 
     /// Load a group from disk
@@ -211,17 +211,17 @@ impl PrefStorePlugin {
     }
 }
 
-impl Plugin for PrefStorePlugin {
-    type Message = PrefMessage;
-    type State = PrefStoreState;
-    type Output = PrefOutput;
+impl Plugin for StorePlugin {
+    type Message = StoreMessage;
+    type State = StoreState;
+    type Output = StoreOutput;
 
     fn name(&self) -> &'static str {
-        "pref_store"
+        "store"
     }
 
     fn init(&self) -> (Self::State, Task<Self::Message>) {
-        let state = PrefStoreState {
+        let state = StoreState {
             store: HashMap::new(),
             storage_dir: self.storage_dir.clone(),
         };
@@ -234,7 +234,7 @@ impl Plugin for PrefStorePlugin {
         message: Self::Message,
     ) -> (Task<Self::Message>, Option<Self::Output>) {
         match message {
-            PrefMessage::Set { group, key, value } => {
+            StoreMessage::Set { group, key, value } => {
                 state
                     .store
                     .entry(group.clone())
@@ -248,7 +248,7 @@ impl Plugin for PrefStorePlugin {
                 let task = Task::perform(
                     async move {
                         let success = Self::save_group(path, data).await.is_ok();
-                        PrefMessage::SaveResult {
+                        StoreMessage::SaveResult {
                             group: group_clone,
                             success,
                         }
@@ -256,22 +256,22 @@ impl Plugin for PrefStorePlugin {
                     std::convert::identity,
                 );
 
-                (task, Some(PrefOutput::Set { group, key }))
+                (task, Some(StoreOutput::Set { group, key }))
             }
 
-            PrefMessage::Get { group, key } => {
+            StoreMessage::Get { group, key } => {
                 if let Some(group_data) = state.store.get(&group) {
                     if let Some(value) = group_data.get(&key) {
                         return (
                             Task::none(),
-                            Some(PrefOutput::Get {
+                            Some(StoreOutput::Get {
                                 group,
                                 key,
                                 value: value.clone(),
                             }),
                         );
                     } else {
-                        return (Task::none(), Some(PrefOutput::NotFound { group, key }));
+                        return (Task::none(), Some(StoreOutput::NotFound { group, key }));
                     }
                 }
 
@@ -283,7 +283,7 @@ impl Plugin for PrefStorePlugin {
                     async move {
                         let data = Self::load_group(path).await.unwrap_or_default();
                         let value = data.get(&key_clone).cloned();
-                        PrefMessage::GetResult {
+                        StoreMessage::GetResult {
                             group: group_clone,
                             key: key_clone,
                             value,
@@ -295,7 +295,7 @@ impl Plugin for PrefStorePlugin {
                 (task, None)
             }
 
-            PrefMessage::GetResult { group, key, value } => {
+            StoreMessage::GetResult { group, key, value } => {
                 if let Some(ref json) = value {
                     state
                         .store
@@ -305,15 +305,15 @@ impl Plugin for PrefStorePlugin {
                 }
 
                 let output = if let Some(value) = value {
-                    PrefOutput::Get { group, key, value }
+                    StoreOutput::Get { group, key, value }
                 } else {
-                    PrefOutput::NotFound { group, key }
+                    StoreOutput::NotFound { group, key }
                 };
 
                 (Task::none(), Some(output))
             }
 
-            PrefMessage::Delete { group, key } => {
+            StoreMessage::Delete { group, key } => {
                 if let Some(group_data) = state.store.get_mut(&group) {
                     if group_data.remove(&key).is_some() {
                         let data = group_data.clone();
@@ -323,7 +323,7 @@ impl Plugin for PrefStorePlugin {
                         let task = Task::perform(
                             async move {
                                 let success = Self::save_group(path, data).await.is_ok();
-                                PrefMessage::SaveResult {
+                                StoreMessage::SaveResult {
                                     group: group_clone,
                                     success,
                                 }
@@ -331,18 +331,18 @@ impl Plugin for PrefStorePlugin {
                             std::convert::identity,
                         );
 
-                        return (task, Some(PrefOutput::Deleted { group, key }));
+                        return (task, Some(StoreOutput::Deleted { group, key }));
                     }
                 }
 
-                (Task::none(), Some(PrefOutput::NotFound { group, key }))
+                (Task::none(), Some(StoreOutput::NotFound { group, key }))
             }
 
-            PrefMessage::SaveResult { group, success } => {
+            StoreMessage::SaveResult { group, success } => {
                 if !success {
                     return (
                         Task::none(),
-                        Some(PrefOutput::Error {
+                        Some(StoreOutput::Error {
                             message: format!("Failed to save group: {}", group),
                         }),
                     );

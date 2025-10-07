@@ -176,7 +176,6 @@ impl App {
                 "Installed Plugins: {:?}",
                 self.plugins.plugin_names()
             )),
-            text("Note: Only one Plugin(PluginMessage) variant in Message enum!").size(12),
         ]
         .spacing(20)
         .padding(20);
@@ -184,8 +183,6 @@ impl App {
         container(content)
             .width(iced::Length::Fill)
             .height(iced::Length::Fill)
-            .center_x(300)
-            .center_y(250)
             .into()
     }
 }
