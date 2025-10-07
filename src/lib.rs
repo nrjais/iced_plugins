@@ -52,14 +52,12 @@ fn output_listener_filtered<O: Clone + Send + Sync + 'static>(
     iced::stream::channel(100, move |mut output_sender: mpsc::Sender<O>| async move {
         let (sender, mut receiver) = mpsc::unbounded();
 
-        // Register this sender in the registry
         if let Ok(mut reg) = registry.lock() {
             reg.entry(plugin_index)
                 .or_insert_with(Vec::new)
                 .push(sender);
         }
 
-        // Listen for outputs
         loop {
             match receiver.next().await {
                 Some(output) => {
@@ -80,9 +78,6 @@ fn output_listener_filtered<O: Clone + Send + Sync + 'static>(
                 None => break,
             }
         }
-
-        // Cleanup happens automatically when the stream ends - the sender
-        // will be dropped and removed via retain() in PluginManager::update()
     })
 }
 
@@ -171,7 +166,7 @@ impl<P: Plugin> PluginHandle<P> {
             output_type_id: TypeId,
             registry: OutputRegistry,
             filter: Option<Arc<dyn Fn(&O) -> bool + Send + Sync>>,
-            filter_id: u64, // For hashing
+            filter_id: u64,
             _phantom: std::marker::PhantomData<O>,
         }
 
@@ -207,7 +202,6 @@ impl<P: Plugin> PluginHandle<P> {
             ))
         }
 
-        // Generate a unique ID for the filter based on its presence
         let filter_id = filter
             .as_ref()
             .map(|f| Arc::as_ptr(f) as *const () as u64)
@@ -446,12 +440,10 @@ impl PluginManager {
             let (task, output) =
                 (entry.update_fn)(entry.state.as_mut(), Arc::clone(&message.message));
 
-            // Send output to all subscribers via the output registry
             if let Some(output) = output
                 && let Ok(mut registry) = self.output_registry.lock()
                 && let Some(senders) = registry.get_mut(&plugin_index)
             {
-                // Send to all subscribers and remove disconnected ones
                 senders.retain(|sender| sender.unbounded_send(output.clone()).is_ok());
             }
 
