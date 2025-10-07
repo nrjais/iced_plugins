@@ -1,8 +1,8 @@
-use iced::widget::{button, column, container, text};
+use iced::widget::{column, container, text};
 use iced::window::Position;
 use iced::{Element, Subscription, Task, window};
 use iced_plugins::{PluginHandle, PluginManager, PluginManagerBuilder, PluginMessage};
-use iced_window_state_plugin::{WindowStateMessage, WindowStateOutput, WindowStatePlugin};
+use iced_window_state_plugin::{WindowStateOutput, WindowStatePlugin};
 const APP_NAME: &str = "window_state_plugin";
 
 fn main() -> iced::Result {
@@ -23,7 +23,6 @@ fn main() -> iced::Result {
 enum Message {
     Plugin(PluginMessage),
     PluginOutput(WindowStateOutput),
-    ManualSave,
 }
 
 impl From<PluginMessage> for Message {
@@ -61,11 +60,6 @@ impl App {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Plugin(plugin_msg) => self.plugins.update(plugin_msg).map(From::from),
-
-            Message::ManualSave => self
-                .window_handle
-                .dispatch(WindowStateMessage::ForceSave)
-                .map(From::from),
             Message::PluginOutput(output) => {
                 self.count += 1;
                 println!("count: {}, output: {:?}", self.count, output);
@@ -118,9 +112,6 @@ impl App {
             text("Window State Plugin").size(32),
             text(info_text).size(14),
             text(path_text).size(11),
-            button("Manual Save")
-                .padding([2, 8])
-                .on_press(Message::ManualSave),
         ]
         .spacing(20)
         .padding(20);

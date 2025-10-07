@@ -9,7 +9,7 @@
 //! - Load state before app creation
 //! - Subscribe to window resize and move events
 //! - Debounced auto-save every 2 seconds
-//! - Manual save support
+//! - Only single window apps are supported
 //!
 //! # Example
 //!
@@ -137,12 +137,8 @@ pub enum WindowStateMessage {
     WindowEvent(iced::Event),
     /// Trigger a save to disk
     SaveToDisk,
-    /// Force save immediately
-    ForceSave,
     /// Save operation completed
     SaveCompleted(Result<WindowState, String>),
-    /// Load operation completed
-    LoadCompleted(Result<Option<WindowState>, String>),
 }
 
 /// Output messages emitted by the window state plugin
@@ -303,15 +299,6 @@ impl Plugin for WindowStatePlugin {
                     (Task::none(), None)
                 }
             }
-            WindowStateMessage::ForceSave => {
-                let path = state.config_path.clone();
-                let window_state = state.state.clone();
-                let task = Task::perform(
-                    Self::save_async(path, window_state),
-                    WindowStateMessage::SaveCompleted,
-                );
-                (task, None)
-            }
             WindowStateMessage::SaveCompleted(result) => match result {
                 Ok(saved_state) => {
                     state.dirty = false;
@@ -322,21 +309,6 @@ impl Plugin for WindowStatePlugin {
                 }
                 Err(e) => {
                     eprintln!("Failed to save window state: {}", e);
-                    (Task::none(), Some(WindowStateOutput::SaveError(e)))
-                }
-            },
-            WindowStateMessage::LoadCompleted(result) => match result {
-                Ok(Some(loaded_state)) => {
-                    state.state = loaded_state.clone();
-                    state.dirty = false;
-                    (
-                        Task::none(),
-                        Some(WindowStateOutput::StateUpdated(loaded_state)),
-                    )
-                }
-                Ok(None) => (Task::none(), None),
-                Err(e) => {
-                    eprintln!("Failed to load window state: {}", e);
                     (Task::none(), Some(WindowStateOutput::SaveError(e)))
                 }
             },

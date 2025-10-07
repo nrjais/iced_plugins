@@ -7,7 +7,7 @@ Automatically save and restore window size and position in Iced applications.
 - Automatically save window size and position
 - Load saved state on app startup
 - Configurable auto-save interval (default: 2 seconds)
-- Manual save and reset operations
+- Only single window apps are supported
 
 ## Usage
 
