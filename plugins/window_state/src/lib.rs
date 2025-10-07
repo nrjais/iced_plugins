@@ -139,8 +139,6 @@ pub enum WindowStateMessage {
     SaveToDisk,
     /// Force save immediately
     ForceSave,
-    /// Reset to default state
-    ResetToDefault,
     /// Save operation completed
     SaveCompleted(Result<WindowState, String>),
     /// Load operation completed
@@ -313,20 +311,6 @@ impl Plugin for WindowStatePlugin {
                     WindowStateMessage::SaveCompleted,
                 );
                 (task, None)
-            }
-            WindowStateMessage::ResetToDefault => {
-                state.state = WindowState::default();
-                state.dirty = true;
-                let path = state.config_path.clone();
-                let window_state = state.state.clone();
-                let task = Task::perform(
-                    Self::save_async(path, window_state),
-                    WindowStateMessage::SaveCompleted,
-                );
-                (
-                    task,
-                    Some(WindowStateOutput::StateReset(state.state.clone())),
-                )
             }
             WindowStateMessage::SaveCompleted(result) => match result {
                 Ok(saved_state) => {

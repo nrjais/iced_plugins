@@ -24,7 +24,6 @@ enum Message {
     Plugin(PluginMessage),
     PluginOutput(WindowStateOutput),
     ManualSave,
-    ResetWindow,
 }
 
 impl From<PluginMessage> for Message {
@@ -66,10 +65,6 @@ impl App {
             Message::ManualSave => self
                 .window_handle
                 .dispatch(WindowStateMessage::ForceSave)
-                .map(From::from),
-            Message::ResetWindow => self
-                .window_handle
-                .dispatch(WindowStateMessage::ResetToDefault)
                 .map(From::from),
             Message::PluginOutput(output) => {
                 self.count += 1;
@@ -126,9 +121,6 @@ impl App {
             button("Manual Save")
                 .padding([2, 8])
                 .on_press(Message::ManualSave),
-            button("Reset to Default")
-                .padding([2, 8])
-                .on_press(Message::ResetWindow),
         ]
         .spacing(20)
         .padding(20);
@@ -136,8 +128,6 @@ impl App {
         container(content)
             .width(iced::Length::Fill)
             .height(iced::Length::Fill)
-            .center_x(300)
-            .center_y(250)
             .into()
     }
 }
