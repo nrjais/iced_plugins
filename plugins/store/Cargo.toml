@@ -6,9 +6,9 @@ description = "A simple JSON-based store plugin for Iced applications"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-directories = "6.0"
-iced = { git = "https://github.com/iced-rs/iced", features = ["tokio"] }
+directories = { workspace = true }
+iced = { workspace = true, features = ["tokio"] }
 iced_plugins = { path = "../.." }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-tokio = { version = "1.0", features = ["fs"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["fs"] }
