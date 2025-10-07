@@ -1,5 +1,6 @@
 //! macOS-specific installation functionality
 
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::process::Command;
@@ -98,16 +99,36 @@ async fn copy_to_applications(app_bundle: &fs::DirEntry) -> Result<(), String> {
     let app_name = app_bundle.file_name();
     let dest = PathBuf::from("/Applications").join(&app_name);
 
-    if dest.exists() {
-        fs::remove_dir_all(&dest)
-            .await
-            .map_err(|e| format!("Failed to remove old app: {}", e))?;
-    }
+    let needs_auth = if dest.exists() {
+        std::fs::metadata(&dest)
+            .map(|metadata| {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = metadata.permissions().mode();
 
-    let copy_output = Command::new("cp")
-        .args(["-R"])
-        .arg(app_bundle.path())
-        .arg(&dest)
+                metadata.uid() != unsafe { libc::getuid() } || (mode & 0o200) == 0
+            })
+            .unwrap_or(true)
+    } else {
+        std::fs::metadata("/Applications")
+            .map(|metadata| {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = metadata.permissions().mode();
+                (mode & 0o200) == 0
+            })
+            .unwrap_or(true)
+    };
+
+    if needs_auth {
+        copy_with_authentication(&app_bundle.path(), &dest).await
+    } else {
+        copy_without_authentication(&app_bundle.path(), &dest).await
+    }
+}
+
+async fn copy_without_authentication(source: &Path, dest: &Path) -> Result<(), String> {
+    let copy_output = Command::new("ditto")
+        .arg(source)
+        .arg(dest)
         .output()
         .await
         .map_err(|e| format!("Failed to copy app: {}", e))?;
@@ -116,7 +137,39 @@ async fn copy_to_applications(app_bundle: &fs::DirEntry) -> Result<(), String> {
         Ok(())
     } else {
         let stderr = String::from_utf8_lossy(&copy_output.stderr);
-        Err(format!("Failed to copy app to Applications: {}", stderr))
+
+        if stderr.contains("Permission denied") {
+            copy_with_authentication(source, dest).await
+        } else {
+            Err(format!("Failed to copy app to Applications: {}", stderr))
+        }
+    }
+}
+
+async fn copy_with_authentication(source: &Path, dest: &Path) -> Result<(), String> {
+    let source_str = source.to_string_lossy();
+    let dest_str = dest.to_string_lossy();
+
+    let copy_script = format!(
+        r#"do shell script "ditto '{}' '{}'" with administrator privileges"#,
+        source_str, dest_str
+    );
+
+    let copy_output = Command::new("osascript")
+        .args(["-e", &copy_script])
+        .output()
+        .await
+        .map_err(|e| format!("Failed to copy app with authentication: {}", e))?;
+
+    if copy_output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&copy_output.stderr);
+        if stderr.contains("User canceled") {
+            Err("User canceled authentication".to_string())
+        } else {
+            Err(format!("Failed to copy app to Applications: {}", stderr))
+        }
     }
 }
 
@@ -250,10 +303,10 @@ async fn find_app_bundle(dir_path: &Path) -> Result<fs::DirEntry, String> {
         .map_err(|e| format!("Failed to read directory '{}': {}", dir_path.display(), e))?;
 
     while let Some(entry) = read_dir.next_entry().await.transpose() {
-        if let Ok(entry) = entry {
-            if entry.path().extension().and_then(|e| e.to_str()) == Some("app") {
-                return Ok(entry);
-            }
+        if let Ok(entry) = entry
+            && entry.path().extension().and_then(|e| e.to_str()) == Some("app")
+        {
+            return Ok(entry);
         }
     }
 
