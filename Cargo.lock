@@ -1652,6 +1652,7 @@ dependencies = [
  "iced_plugins",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

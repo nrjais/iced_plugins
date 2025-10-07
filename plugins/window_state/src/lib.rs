@@ -44,9 +44,9 @@ use iced::window::Event;
 use iced::{Subscription, Task};
 use iced_plugins::Plugin;
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
+use tokio::fs;
 
 /// Window state data structure that is serialized to disk
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -141,6 +141,10 @@ pub enum WindowStateMessage {
     ForceSave,
     /// Reset to default state
     ResetToDefault,
+    /// Save operation completed
+    SaveCompleted(Result<WindowState, String>),
+    /// Load operation completed
+    LoadCompleted(Result<Option<WindowState>, String>),
 }
 
 /// Output messages emitted by the window state plugin
@@ -217,22 +221,26 @@ impl WindowStatePlugin {
             .join("window_state.json")
     }
 
-    /// Load window state from disk
+    /// Load window state from disk (blocking version for pre-app initialization)
     pub fn load(app_name: &str) -> Option<WindowState> {
         let path = Self::config_path(app_name);
-        let contents = fs::read_to_string(&path).ok()?;
-        serde_json::from_str(&contents).ok()?
+        let contents = std::fs::read_to_string(&path).ok()?;
+        serde_json::from_str(&contents).ok()
     }
 
-    /// Save window state to disk
-    fn save(&self, state: &WindowState) -> Result<(), Box<dyn std::error::Error>> {
-        let path = &self.config_path;
+    /// Save window state to disk (async)
+    async fn save_async(path: PathBuf, state: WindowState) -> Result<WindowState, String> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent)
+                .await
+                .map_err(|e| format!("Failed to create config directory: {}", e))?;
         }
-        let contents = serde_json::to_string_pretty(state)?;
-        fs::write(path, contents)?;
-        Ok(())
+        let contents = serde_json::to_string_pretty(&state)
+            .map_err(|e| format!("Failed to serialize window state: {}", e))?;
+        fs::write(&path, contents)
+            .await
+            .map_err(|e| format!("Failed to write window state: {}", e))?;
+        Ok(state)
     }
 }
 
@@ -259,65 +267,100 @@ impl Plugin for WindowStatePlugin {
         state: &mut Self::State,
         message: Self::Message,
     ) -> (Task<Self::Message>, Option<Self::Output>) {
-        let output = match message {
+        match message {
             WindowStateMessage::WindowEvent(Window(Event::Resized(size))) => {
                 if state.state.size != size {
                     state.state.size = size;
                     state.dirty = true;
-                    Some(WindowStateOutput::StateUpdated(state.state.clone()))
+                    (
+                        Task::none(),
+                        Some(WindowStateOutput::StateUpdated(state.state.clone())),
+                    )
                 } else {
-                    None
+                    (Task::none(), None)
                 }
             }
             WindowStateMessage::WindowEvent(Window(Event::Moved(position))) => {
                 if state.state.position != position {
                     state.state.position = position;
                     state.dirty = true;
-                    Some(WindowStateOutput::StateUpdated(state.state.clone()))
+                    (
+                        Task::none(),
+                        Some(WindowStateOutput::StateUpdated(state.state.clone())),
+                    )
                 } else {
-                    None
+                    (Task::none(), None)
                 }
             }
             WindowStateMessage::SaveToDisk => {
                 if state.dirty {
-                    if let Err(e) = self.save(state.current_state()) {
-                        eprintln!("Failed to save window state: {}", e);
-                        Some(WindowStateOutput::SaveError(e.to_string()))
-                    } else {
-                        state.dirty = false;
-                        Some(WindowStateOutput::StateSaved(state.state.clone()))
-                    }
+                    let path = state.config_path.clone();
+                    let window_state = state.state.clone();
+                    let task = Task::perform(
+                        Self::save_async(path, window_state),
+                        WindowStateMessage::SaveCompleted,
+                    );
+                    (task, None)
                 } else {
-                    None
+                    (Task::none(), None)
                 }
             }
             WindowStateMessage::ForceSave => {
-                if let Err(e) = self.save(state.current_state()) {
-                    eprintln!("Failed to force save window state: {}", e);
-                    Some(WindowStateOutput::SaveError(e.to_string()))
-                } else {
-                    state.dirty = false;
-                    Some(WindowStateOutput::StateSaved(state.state.clone()))
-                }
+                let path = state.config_path.clone();
+                let window_state = state.state.clone();
+                let task = Task::perform(
+                    Self::save_async(path, window_state),
+                    WindowStateMessage::SaveCompleted,
+                );
+                (task, None)
             }
             WindowStateMessage::ResetToDefault => {
                 state.state = WindowState::default();
                 state.dirty = true;
-                if let Err(e) = self.save(state.current_state()) {
-                    eprintln!("Failed to save reset window state: {}", e);
-                    Some(WindowStateOutput::SaveError(e.to_string()))
-                } else {
-                    state.dirty = false;
-                    Some(WindowStateOutput::StateReset(state.state.clone()))
-                }
+                let path = state.config_path.clone();
+                let window_state = state.state.clone();
+                let task = Task::perform(
+                    Self::save_async(path, window_state),
+                    WindowStateMessage::SaveCompleted,
+                );
+                (
+                    task,
+                    Some(WindowStateOutput::StateReset(state.state.clone())),
+                )
             }
+            WindowStateMessage::SaveCompleted(result) => match result {
+                Ok(saved_state) => {
+                    state.dirty = false;
+                    (
+                        Task::none(),
+                        Some(WindowStateOutput::StateSaved(saved_state)),
+                    )
+                }
+                Err(e) => {
+                    eprintln!("Failed to save window state: {}", e);
+                    (Task::none(), Some(WindowStateOutput::SaveError(e)))
+                }
+            },
+            WindowStateMessage::LoadCompleted(result) => match result {
+                Ok(Some(loaded_state)) => {
+                    state.state = loaded_state.clone();
+                    state.dirty = false;
+                    (
+                        Task::none(),
+                        Some(WindowStateOutput::StateUpdated(loaded_state)),
+                    )
+                }
+                Ok(None) => (Task::none(), None),
+                Err(e) => {
+                    eprintln!("Failed to load window state: {}", e);
+                    (Task::none(), Some(WindowStateOutput::SaveError(e)))
+                }
+            },
             WindowStateMessage::WindowEvent(_) => {
                 // Ignore other window events, they are filtered out by the listen_with
-                None
+                (Task::none(), None)
             }
-        };
-
-        (Task::none(), output)
+        }
     }
 
     fn subscription(&self, _state: &Self::State) -> Subscription<Self::Message> {
