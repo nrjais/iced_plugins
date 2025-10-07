@@ -18,16 +18,6 @@ An automatic update plugin for Iced applications that checks for updates from Gi
 - **macOS**: Full support for .dmg, .tar.gz, and .zip bundles
 - **Linux**: Support for .deb packages (Debian/Ubuntu)
 
-## Installation
-
-Add to your `Cargo.toml`:
-
-```toml
-[dependencies]
-iced_auto_updater_plugin = { path = "path/to/iced_plugins/plugins/auto_updater" }
-iced_plugins = { path = "path/to/iced_plugins" }
-```
-
 ## Quick Start
 
 ```rust

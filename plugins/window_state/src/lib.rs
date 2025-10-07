@@ -356,10 +356,7 @@ impl Plugin for WindowStatePlugin {
                     (Task::none(), Some(WindowStateOutput::SaveError(e)))
                 }
             },
-            WindowStateMessage::WindowEvent(_) => {
-                // Ignore other window events, they are filtered out by the listen_with
-                (Task::none(), None)
-            }
+            WindowStateMessage::WindowEvent(_) => (Task::none(), None),
         }
     }
 

@@ -74,8 +74,8 @@ impl UpdaterConfig {
             owner: owner.into(),
             repo: repo.into(),
             current_version: current_version.into(),
-            auto_check_interval: 0, // Disabled by default
-            check_on_start: false,  // Disabled by default
+            auto_check_interval: 0,
+            check_on_start: false,
         }
     }
 
@@ -240,7 +240,6 @@ impl AutoUpdaterPlugin {
             .await
             .map_err(|e| format!("Failed to parse release info: {}", e))?;
 
-        // Simple version comparison (remove 'v' prefix if present)
         let latest_version = release.tag_name.trim_start_matches('v');
         let current = current_version.trim_start_matches('v');
 
@@ -267,7 +266,6 @@ impl AutoUpdaterPlugin {
             ));
         }
 
-        // Create parent directory if it doesn't exist
         if let Some(parent) = dest_path.parent() {
             fs::create_dir_all(parent)
                 .await
@@ -311,7 +309,6 @@ impl AutoUpdaterPlugin {
             .await
             .map_err(|e| format!("Failed to read SHA256: {}", e))?;
 
-        // Extract just the hash (first 64 characters)
         let hash = content
             .split_whitespace()
             .next()
@@ -415,7 +412,6 @@ impl AutoUpdaterPlugin {
         let os = Self::detect_os();
         let arch = Self::detect_arch();
 
-        // Common OS name variations
         let os_patterns = match os {
             "macos" => vec!["macos", "darwin", "osx", "mac"],
             "linux" => vec!["linux"],
@@ -423,7 +419,6 @@ impl AutoUpdaterPlugin {
             _ => vec![os],
         };
 
-        // Common arch name variations
         let arch_patterns = match arch {
             "x86_64" => vec!["x86_64", "amd64", "x64"],
             "aarch64" => vec!["aarch64", "arm64"],
@@ -432,7 +427,6 @@ impl AutoUpdaterPlugin {
             _ => vec![arch],
         };
 
-        // Try to find an asset matching both OS and architecture
         release
             .assets
             .iter()
@@ -443,7 +437,6 @@ impl AutoUpdaterPlugin {
                 has_os && has_arch
             })
             .or_else(|| {
-                // Fallback: try to find asset with just OS if no arch-specific one found
                 release.assets.iter().find(|asset| {
                     let name = asset.name.to_lowercase();
                     os_patterns.iter().any(|pattern| name.contains(pattern))
@@ -480,7 +473,6 @@ impl Plugin for AutoUpdaterPlugin {
             downloaded_file: None,
         };
 
-        // Check for updates on start if enabled
         let init_task = if self.config.check_on_start {
             let owner = self.config.owner.clone();
             let repo = self.config.repo.clone();
@@ -559,11 +551,9 @@ impl Plugin for AutoUpdaterPlugin {
                 Ok(path) => {
                     state.downloaded_file = Some(path.clone());
 
-                    // Find SHA256 asset
                     if let Some(release) = &state.latest_release {
                         if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
                             if let Some(sha256_asset) = self.find_sha256_asset(release, file_name) {
-                                // Download and verify SHA256
                                 let file_path = path.clone();
                                 let sha256_url = sha256_asset.browser_download_url.clone();
 
@@ -581,7 +571,6 @@ impl Plugin for AutoUpdaterPlugin {
                         }
                     }
 
-                    // If no SHA256 file found, skip verification and install
                     let task = Task::perform(
                         Self::install(path.clone()),
                         AutoUpdaterMessage::InstallationResult,
@@ -622,7 +611,6 @@ impl Plugin for AutoUpdaterPlugin {
             }
 
             AutoUpdaterMessage::AutoCheckTick => {
-                // Only check if not currently updating
                 if !state.is_updating {
                     let owner = self.config.owner.clone();
                     let repo = self.config.repo.clone();

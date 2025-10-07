@@ -22,16 +22,12 @@ pub async fn install(file_path: PathBuf) -> Result<(), String> {
 
 /// Install from DMG file
 async fn install_dmg(dmg_path: PathBuf) -> Result<(), String> {
-    // Mount the DMG
     let volume_path = mount_dmg(&dmg_path).await?;
 
-    // Find and copy the app bundle
     let copy_result = find_and_copy_app(&volume_path).await;
 
-    // Always try to unmount, even if copy failed
     unmount_dmg_with_retry(&volume_path).await;
 
-    // Return the copy result
     copy_result
 }
 
@@ -56,18 +52,15 @@ async fn mount_dmg(dmg_path: &Path) -> Result<String, String> {
 fn parse_volume_path(output: &[u8]) -> Result<String, String> {
     let mount_info = String::from_utf8_lossy(output);
 
-    // Look for the last line that contains /Volumes/ - this is the actual mount point
-    // Format: /dev/diskX    TYPE    /Volumes/Name
     let volume_path = mount_info
         .lines()
-        .rev() // Start from the end
+        .rev()
         .find_map(|line| {
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 return None;
             }
 
-            // The mount point is typically the last field after tabs
             let parts: Vec<&str> = line.split('\t').collect();
             for part in parts.iter().rev() {
                 let trimmed_part = part.trim();
@@ -84,7 +77,6 @@ fn parse_volume_path(output: &[u8]) -> Result<String, String> {
             )
         })?;
 
-    // Verify the volume path exists
     if !PathBuf::from(&volume_path).exists() {
         return Err(format!(
             "Mount point '{}' does not exist. Full output:\n{}",
@@ -106,14 +98,12 @@ async fn copy_to_applications(app_bundle: &fs::DirEntry) -> Result<(), String> {
     let app_name = app_bundle.file_name();
     let dest = PathBuf::from("/Applications").join(&app_name);
 
-    // Remove existing app if present
     if dest.exists() {
         fs::remove_dir_all(&dest)
             .await
             .map_err(|e| format!("Failed to remove old app: {}", e))?;
     }
 
-    // Copy new app
     let copy_output = Command::new("cp")
         .args(["-R"])
         .arg(app_bundle.path())
@@ -132,13 +122,10 @@ async fn copy_to_applications(app_bundle: &fs::DirEntry) -> Result<(), String> {
 
 /// Unmount a DMG with retry logic
 async fn unmount_dmg_with_retry(volume_path: &str) {
-    // Sync file system to ensure all writes are complete
     let _ = Command::new("sync").output().await;
 
-    // Wait a bit for the file system to release handles
     sleep(Duration::from_millis(500)).await;
 
-    // Try to unmount DMG with retries
     let mut detach_success = false;
     for attempt in 1..=3 {
         let detach_result = Command::new("hdiutil")
@@ -155,7 +142,6 @@ async fn unmount_dmg_with_retry(volume_path: &str) {
                 if attempt < 3 {
                     sleep(Duration::from_millis(500)).await;
                 } else {
-                    // Last attempt failed, try force detach
                     eprintln!(
                         "Warning: Failed to detach DMG after {} attempts: {}",
                         attempt,

@@ -1,0 +1,14 @@
+[package]
+name = "iced_pref_store_plugin"
+version = "0.1.0"
+edition = "2024"
+description = "A simple, type-safe preference store plugin for Iced applications"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+directories = "6.0"
+iced = { git = "https://github.com/iced-rs/iced", features = ["tokio"] }
+iced_plugins = { path = "../.." }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["fs"] }
