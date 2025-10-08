@@ -1,4 +1,4 @@
-use iced::widget::{column, container, text};
+use iced::widget::{column, container, scrollable, text};
 use iced::window::Position;
 use iced::{Element, Subscription, Task, window};
 use iced_plugins::{PluginHandle, PluginManager, PluginManagerBuilder, PluginMessage};
@@ -58,7 +58,10 @@ impl App {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Plugin(plugin_msg) => self.plugins.update(plugin_msg).map(From::from),
-            Message::WindowSaved => Task::none(),
+            Message::WindowSaved => {
+                println!("Window state saved");
+                Task::none()
+            }
         }
     }
 
@@ -106,7 +109,7 @@ impl App {
         .spacing(20)
         .padding(20);
 
-        container(content)
+        scrollable(content)
             .width(iced::Length::Fill)
             .height(iced::Length::Fill)
             .into()

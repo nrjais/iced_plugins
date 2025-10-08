@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, text};
+use iced::widget::{button, column, scrollable, text};
 use iced::{Element, Subscription, Task};
 use iced_plugins::{Plugin, PluginHandle, PluginManager, PluginManagerBuilder, PluginMessage};
 use std::time::Duration;
@@ -180,7 +180,7 @@ impl App {
         .spacing(20)
         .padding(20);
 
-        container(content)
+        scrollable(content)
             .width(iced::Length::Fill)
             .height(iced::Length::Fill)
             .into()

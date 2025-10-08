@@ -9,7 +9,7 @@
 //! - Load state before app creation
 //! - Subscribe to window resize and move events
 //! - Debounced auto-save every 2 seconds
-//! - Only single window apps are supported
+//! - Only tracks the first window (main window) in multi-window apps
 //!
 //! # Example
 //!
@@ -40,7 +40,7 @@
 use iced::Event::Window;
 use iced::event::listen_with;
 use iced::time::every;
-use iced::window::Event;
+use iced::window::{Event, Id};
 use iced::{Subscription, Task};
 use iced_plugins::Plugin;
 use serde::{Deserialize, Serialize};
@@ -132,8 +132,9 @@ impl Default for WindowState {
 
 #[derive(Clone, Debug)]
 pub enum WindowEvent {
-    Resized(iced::Size),
-    Moved(iced::Point),
+    Resized(Id, iced::Size),
+    Moved(Id, iced::Point),
+    Opened(Id),
 }
 
 /// Messages that the window state plugin handles
@@ -170,6 +171,8 @@ pub struct WindowPluginState {
     dirty: bool,
     /// Config path
     config_path: PathBuf,
+    /// The oldest (main) window ID that we track
+    oldest_window_id: Option<Id>,
 }
 
 impl WindowPluginState {
@@ -181,6 +184,11 @@ impl WindowPluginState {
     /// Get the config path
     pub fn config_path(&self) -> &PathBuf {
         &self.config_path
+    }
+
+    /// Get the oldest window ID being tracked
+    pub fn oldest_window_id(&self) -> Option<Id> {
+        self.oldest_window_id
     }
 }
 
@@ -244,6 +252,17 @@ impl WindowStatePlugin {
     }
 }
 
+/// Subscription for listening to all window events
+fn window_events() -> Subscription<WindowStateMessage> {
+    listen_with(|event, _, id| match event {
+        Window(Event::Moved(position)) => Some(WindowEvent::Moved(id, position)),
+        Window(Event::Resized(size)) => Some(WindowEvent::Resized(id, size)),
+        Window(Event::Opened { .. }) => Some(WindowEvent::Opened(id)),
+        _ => None,
+    })
+    .map(WindowStateMessage::WindowEvent)
+}
+
 impl Plugin for WindowStatePlugin {
     type Message = WindowStateMessage;
     type State = WindowPluginState;
@@ -258,6 +277,7 @@ impl Plugin for WindowStatePlugin {
             state: Self::load(&self.app_name).unwrap_or_default(),
             dirty: false,
             config_path: self.config_path.clone(),
+            oldest_window_id: None,
         };
         (state, Task::none())
     }
@@ -268,7 +288,17 @@ impl Plugin for WindowStatePlugin {
         message: Self::Message,
     ) -> (Task<Self::Message>, Option<Self::Output>) {
         match message {
-            WindowStateMessage::WindowEvent(WindowEvent::Resized(size)) => {
+            WindowStateMessage::WindowEvent(WindowEvent::Opened(id)) => {
+                if state.oldest_window_id.is_none() {
+                    state.oldest_window_id = Some(id);
+                }
+                (Task::none(), None)
+            }
+            WindowStateMessage::WindowEvent(WindowEvent::Resized(id, size)) => {
+                if state.oldest_window_id != Some(id) {
+                    return (Task::none(), None);
+                }
+
                 if state.state.size != size {
                     state.state.size = size;
                     state.dirty = true;
@@ -280,7 +310,11 @@ impl Plugin for WindowStatePlugin {
                     (Task::none(), None)
                 }
             }
-            WindowStateMessage::WindowEvent(WindowEvent::Moved(position)) => {
+            WindowStateMessage::WindowEvent(WindowEvent::Moved(id, position)) => {
+                if state.oldest_window_id != Some(id) {
+                    return (Task::none(), None);
+                }
+
                 if state.state.position != position {
                     state.state.position = position;
                     state.dirty = true;
@@ -322,15 +356,8 @@ impl Plugin for WindowStatePlugin {
     }
 
     fn subscription(&self, _state: &Self::State) -> Subscription<Self::Message> {
-        let window_event_sub = listen_with(|event, _, _| match event {
-            Window(Event::Moved(position)) => Some(WindowEvent::Moved(position)),
-            Window(Event::Resized(size)) => Some(WindowEvent::Resized(size)),
-            _ => None,
-        })
-        .map(WindowStateMessage::WindowEvent);
-
         Subscription::batch([
-            window_event_sub,
+            window_events(),
             every(Duration::from_secs(self.auto_save_interval))
                 .map(|_| WindowStateMessage::SaveToDisk),
         ])

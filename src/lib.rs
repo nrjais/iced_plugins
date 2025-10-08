@@ -58,22 +58,15 @@ fn output_listener_filtered<O: Clone + Send + Sync + 'static, R>(
                 .push(sender);
         }
 
-        loop {
-            match receiver.next().await {
-                Some(output) => {
-                    if plugin_index == output.plugin_index()
-                        && output_type_id == output.type_id
-                        && let Some(output) = output.downcast::<O>()
-                    {
-                        if let Some(event) = filter(output.clone())
-                            && output_sender.send(event).await.is_err()
-                        {
-                            break;
-                        };
-                    }
-                }
-                None => break,
-            }
+        while let Some(output) = receiver.next().await {
+            if plugin_index == output.plugin_index()
+                && output_type_id == output.type_id
+                && let Some(output) = output.downcast::<O>()
+                && let Some(event) = filter(output.clone())
+                && output_sender.send(event).await.is_err()
+            {
+                break;
+            };
         }
     })
 }
@@ -129,7 +122,7 @@ impl<P: Plugin> PluginHandle<P> {
     /// }
     /// ```
     pub fn listen(&self) -> iced::Subscription<P::Output> {
-        self.listen_with_filter(Arc::new(|output| Some(output)))
+        self.listen_with_filter(Arc::new(Some))
     }
 
     /// Subscribe to filtered outputs from this plugin

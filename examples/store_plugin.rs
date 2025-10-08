@@ -3,7 +3,7 @@
 //! This example shows how to use the store plugin to persist
 //! application data with group organization.
 
-use iced::widget::{button, column, container, row, text, text_input};
+use iced::widget::{button, column, row, scrollable, text, text_input};
 use iced::{Element, Length, Task};
 use iced_plugins::{PluginHandle, PluginManager, PluginMessage};
 use iced_store_plugin::{StoreMessage, StoreOutput, StorePlugin};
@@ -220,7 +220,7 @@ impl App {
         .spacing(10)
         .padding(20);
 
-        container(content)
+        scrollable(content)
             .width(Length::Fill)
             .height(Length::Fill)
             .into()

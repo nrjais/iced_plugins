@@ -23,7 +23,7 @@
 //! cargo run --example auto_updater_plugin
 //! ```
 
-use iced::widget::{Column, Row, button, container, progress_bar, scrollable, text};
+use iced::widget::{Column, Row, button, progress_bar, scrollable, text};
 use iced::{Element, Fill, Length, Subscription, Task};
 use iced_auto_updater_plugin::{
     AutoUpdaterMessage, AutoUpdaterOutput, AutoUpdaterPlugin, ReleaseInfo, UpdaterConfig,
@@ -316,11 +316,7 @@ impl App {
             .padding(20)
             .width(Fill);
 
-        container(scrollable(content))
-            .width(Fill)
-            .height(Fill)
-            .padding(10)
-            .into()
+        scrollable(content).width(Fill).height(Fill).into()
     }
 
     fn get_step_indicator(&self) -> Element<'_, Message> {

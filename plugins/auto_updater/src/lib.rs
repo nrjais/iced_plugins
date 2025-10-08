@@ -280,7 +280,7 @@ impl AutoUpdaterPlugin {
 
             let total_size = response
                 .content_length()
-                .ok_or_else(|| format!("Failed to get content length"))?;
+                .ok_or_else(|| "Failed to get content length".to_string())?;
 
             if let Some(parent) = dest_path.parent() {
                 fs::create_dir_all(parent)
