@@ -1,0 +1,14 @@
+[package]
+name = "iced_tray_icon_plugin"
+version = "0.1.0"
+edition = "2024"
+description = "System tray icon plugin for Iced applications"
+license = "MIT"
+
+[dependencies]
+iced = { workspace = true, features = ["tokio"] }
+iced_plugins = { path = "../.." }
+image = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+tray-icon = { workspace = true }

@@ -178,6 +178,7 @@ Message::ButtonClick => {
 - **[window_state](plugins/window_state)** - Automatically save and restore window size/position
 - **[auto_updater](plugins/auto_updater)** - Automatic updates from GitHub releases with SHA256 verification (macOS)
 - **[store](plugins/store)** - Simple JSON-based store with automatic persistence
+- **[tray_icon](plugins/tray_icon)** - System tray icon with menu support (Windows, macOS, Linux)
 
 ## Examples
 
@@ -185,3 +186,4 @@ Message::ButtonClick => {
 - `cargo run --example window_state_plugin` - Window state persistence
 - `cargo run --example auto_updater_plugin` - Automatic updates from GitHub
 - `cargo run --example store_plugin` - Simple JSON-based data storage
+- `cargo run --example tray_icon_plugin` - System tray icon with menu

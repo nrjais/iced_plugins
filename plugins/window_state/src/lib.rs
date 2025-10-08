@@ -130,11 +130,17 @@ impl Default for WindowState {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum WindowEvent {
+    Resized(iced::Size),
+    Moved(iced::Point),
+}
+
 /// Messages that the window state plugin handles
 #[derive(Clone, Debug)]
 pub enum WindowStateMessage {
     /// Window event
-    WindowEvent(iced::Event),
+    WindowEvent(WindowEvent),
     /// Trigger a save to disk
     SaveToDisk,
     /// Save operation completed
@@ -262,7 +268,7 @@ impl Plugin for WindowStatePlugin {
         message: Self::Message,
     ) -> (Task<Self::Message>, Option<Self::Output>) {
         match message {
-            WindowStateMessage::WindowEvent(Window(Event::Resized(size))) => {
+            WindowStateMessage::WindowEvent(WindowEvent::Resized(size)) => {
                 if state.state.size != size {
                     state.state.size = size;
                     state.dirty = true;
@@ -274,7 +280,7 @@ impl Plugin for WindowStatePlugin {
                     (Task::none(), None)
                 }
             }
-            WindowStateMessage::WindowEvent(Window(Event::Moved(position))) => {
+            WindowStateMessage::WindowEvent(WindowEvent::Moved(position)) => {
                 if state.state.position != position {
                     state.state.position = position;
                     state.dirty = true;
@@ -312,13 +318,13 @@ impl Plugin for WindowStatePlugin {
                     (Task::none(), Some(WindowStateOutput::SaveError(e)))
                 }
             },
-            WindowStateMessage::WindowEvent(_) => (Task::none(), None),
         }
     }
 
     fn subscription(&self, _state: &Self::State) -> Subscription<Self::Message> {
-        let window_event_sub = listen_with(|event, _, _| match &event {
-            Window(Event::Moved(_) | Event::Resized(_)) => Some(event),
+        let window_event_sub = listen_with(|event, _, _| match event {
+            Window(Event::Moved(position)) => Some(WindowEvent::Moved(position)),
+            Window(Event::Resized(size)) => Some(WindowEvent::Resized(size)),
             _ => None,
         })
         .map(WindowStateMessage::WindowEvent);

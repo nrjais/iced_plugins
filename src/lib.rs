@@ -229,7 +229,7 @@ pub struct PluginMessage {
 }
 
 impl PluginMessage {
-    /// Create a new plugin message (internal use)
+    /// Create a new plugin message
     fn new<M: 'static + Send + Sync>(plugin_index: usize, message: M) -> Self {
         Self {
             plugin_index,
