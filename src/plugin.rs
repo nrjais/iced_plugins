@@ -8,6 +8,9 @@ use std::sync::{Arc, Mutex};
 /// Core trait that all plugins must implement.
 /// Plugins can have their own state and respond to messages.
 pub trait Plugin: Send + Sync + Debug {
+    /// The input message type that applications use to dispatch actions
+    type Input: Into<Self::Message>;
+
     /// The message type this plugin handles
     type Message: Clone + Send + Sync + Debug + 'static;
 
@@ -88,21 +91,20 @@ impl<P: Plugin> PluginHandle<P> {
         }
     }
 
-    /// Create a task that dispatches a message to this plugin
+    /// Create a task that dispatches an input to this plugin
     ///
     /// # Example
     /// ```ignore
     /// let handle = plugins.install(MyPlugin);
-    /// let task = handle.dispatch(MyMessage::DoSomething);
+    /// let task = handle.dispatch(MyInput::DoSomething);
     /// ```
-    pub fn dispatch(&self, message: P::Message) -> Task<PluginMessage> {
-        let plugin_msg = PluginMessage::new(self.plugin_index, message);
-        Task::done(plugin_msg)
+    pub fn dispatch(&self, input: P::Input) -> Task<PluginMessage> {
+        Task::done(self.input(input).into())
     }
 
-    /// Wrap a plugin message into a PluginMessage
-    pub fn message(&self, message: P::Message) -> PluginMessage {
-        PluginMessage::new(self.plugin_index, message)
+    /// Wrap a plugin input into a PluginMessage for use in messages
+    pub fn input(&self, input: P::Input) -> PluginMessage {
+        PluginMessage::new(self.plugin_index, input.into())
     }
 
     /// Subscribe to outputs from this plugin with an optional filter

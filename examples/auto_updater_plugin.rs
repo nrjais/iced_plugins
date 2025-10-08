@@ -26,7 +26,7 @@
 use iced::widget::{Column, Row, button, progress_bar, scrollable, text};
 use iced::{Element, Fill, Length, Subscription, Task};
 use iced_auto_updater_plugin::{
-    AutoUpdaterMessage, AutoUpdaterOutput, AutoUpdaterPlugin, ReleaseInfo, UpdaterConfig,
+    AutoUpdaterInput, AutoUpdaterOutput, AutoUpdaterPlugin, ReleaseInfo, UpdaterConfig,
 };
 use iced_plugins::{PluginHandle, PluginManager, PluginManagerBuilder, PluginMessage};
 
@@ -214,14 +214,14 @@ impl App {
                 self.status_message = "🔍 Checking for updates...".to_string();
 
                 self.updater_handle
-                    .dispatch(AutoUpdaterMessage::CheckForUpdates)
+                    .dispatch(AutoUpdaterInput::CheckForUpdates)
                     .map(Message::Plugin)
             }
 
             Message::DownloadAndInstall => {
                 if let Some(release) = self.available_update.clone() {
                     self.updater_handle
-                        .dispatch(AutoUpdaterMessage::DownloadAndInstall(release))
+                        .dispatch(AutoUpdaterInput::DownloadAndInstall(release))
                         .map(Message::Plugin)
                 } else {
                     Task::none()

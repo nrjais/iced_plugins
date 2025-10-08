@@ -6,7 +6,7 @@
 use iced::widget::{button, column, row, scrollable, text, text_input};
 use iced::{Element, Length, Task};
 use iced_plugins::{PluginHandle, PluginManager, PluginMessage};
-use iced_store_plugin::{StoreMessage, StoreOutput, StorePlugin};
+use iced_store_plugin::{StoreInput, StoreOutput, StorePlugin};
 use serde::{Deserialize, Serialize};
 
 const APP_NAME: &str = "store_example";
@@ -78,7 +78,7 @@ impl App {
 
         // Auto-load data on startup
         let load_task = store_handle
-            .dispatch(StoreMessage::get("ui", "user"))
+            .dispatch(StoreInput::get("ui", "user"))
             .map(Message::Plugin);
 
         (
@@ -144,7 +144,7 @@ impl App {
 
                     return self
                         .store_handle
-                        .dispatch(StoreMessage::set("ui", "user", data))
+                        .dispatch(StoreInput::set("ui", "user", data))
                         .map(Message::Plugin);
                 } else {
                     self.status_message = "Invalid font size".to_string();
@@ -154,14 +154,14 @@ impl App {
             Message::LoadData => {
                 return self
                     .store_handle
-                    .dispatch(StoreMessage::get("ui", "user"))
+                    .dispatch(StoreInput::get("ui", "user"))
                     .map(Message::Plugin);
             }
 
             Message::DeleteData => {
                 return self
                     .store_handle
-                    .dispatch(StoreMessage::delete("ui", "user"))
+                    .dispatch(StoreInput::delete("ui", "user"))
                     .map(Message::Plugin);
             }
         }

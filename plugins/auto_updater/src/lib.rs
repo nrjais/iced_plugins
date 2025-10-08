@@ -128,6 +128,26 @@ impl DownloadProgress {
     }
 }
 
+/// Public input API that applications use
+#[derive(Clone, Debug)]
+pub enum AutoUpdaterInput {
+    /// Check for updates from GitHub
+    CheckForUpdates,
+    /// Download and install update
+    DownloadAndInstall(ReleaseInfo),
+}
+
+impl From<AutoUpdaterInput> for AutoUpdaterMessage {
+    fn from(input: AutoUpdaterInput) -> Self {
+        match input {
+            AutoUpdaterInput::CheckForUpdates => AutoUpdaterMessage::CheckForUpdates,
+            AutoUpdaterInput::DownloadAndInstall(release) => {
+                AutoUpdaterMessage::DownloadAndInstall(release)
+            }
+        }
+    }
+}
+
 /// Messages that the auto updater plugin handles
 #[derive(Clone, Debug)]
 pub enum AutoUpdaterMessage {
@@ -488,6 +508,7 @@ impl AutoUpdaterPlugin {
 }
 
 impl Plugin for AutoUpdaterPlugin {
+    type Input = AutoUpdaterInput;
     type Message = AutoUpdaterMessage;
     type State = AutoUpdaterState;
     type Output = AutoUpdaterOutput;

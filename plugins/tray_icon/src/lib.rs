@@ -17,7 +17,32 @@ pub use tray_icon::{Icon, TrayIconBuilder};
 use tray_icon::menu::{Menu, MenuEvent};
 use tray_icon::{TrayIcon, TrayIconEvent};
 
-/// Messages that the tray icon plugin handles
+/// Public input API that applications use
+#[derive(Clone, Debug)]
+pub enum TrayIconInput {
+    /// Update the tray icon
+    SetIcon(Vec<u8>),
+    /// Update the tooltip
+    SetTooltip(Option<String>),
+    /// Show the tray icon
+    Show,
+    /// Hide the tray icon
+    Hide,
+}
+
+impl From<TrayIconInput> for TrayIconMessage {
+    fn from(input: TrayIconInput) -> Self {
+        match input {
+            TrayIconInput::SetIcon(data) => TrayIconMessage::SetIcon(data),
+            TrayIconInput::SetTooltip(tooltip) => TrayIconMessage::SetTooltip(tooltip),
+            TrayIconInput::Show => TrayIconMessage::Show,
+            TrayIconInput::Hide => TrayIconMessage::Hide,
+        }
+    }
+}
+
+/// Internal messages that the tray icon plugin handles
+/// Note: This is for internal use. Applications should use `TrayIconInput` instead.
 #[derive(Clone, Debug)]
 pub enum TrayIconMessage {
     /// Update the tray icon
@@ -176,6 +201,7 @@ impl TrayIconPlugin {
 }
 
 impl Plugin for TrayIconPlugin {
+    type Input = TrayIconInput;
     type Message = TrayIconMessage;
     type State = TrayIconState;
     type Output = TrayIconOutput;

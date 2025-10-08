@@ -9,10 +9,26 @@ fn main() -> iced::Result {
         .run()
 }
 
+// Public Input API - this is what applications use
 #[derive(Clone, Debug)]
-pub enum CounterMessage {
+pub enum CounterInput {
     Increment,
     Decrement,
+}
+
+#[derive(Clone, Debug)]
+pub enum CounterMessage {
+    DoIncrement,
+    DoDecrement,
+}
+
+impl From<CounterInput> for CounterMessage {
+    fn from(input: CounterInput) -> Self {
+        match input {
+            CounterInput::Increment => CounterMessage::DoIncrement,
+            CounterInput::Decrement => CounterMessage::DoDecrement,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -24,6 +40,7 @@ pub struct CounterState {
 pub struct CounterPlugin;
 
 impl Plugin for CounterPlugin {
+    type Input = CounterInput;
     type Message = CounterMessage;
     type State = CounterState;
     type Output = ();
@@ -42,11 +59,11 @@ impl Plugin for CounterPlugin {
         message: Self::Message,
     ) -> (iced::Task<Self::Message>, Option<Self::Output>) {
         match message {
-            CounterMessage::Increment => {
+            CounterMessage::DoIncrement => {
                 state.value += 1;
                 (iced::Task::none(), None)
             }
-            CounterMessage::Decrement => {
+            CounterMessage::DoDecrement => {
                 state.value -= 1;
                 (iced::Task::none(), None)
             }
@@ -59,6 +76,16 @@ impl Plugin for CounterPlugin {
 }
 
 // Plugin 2: Timer Plugin that auto-increments
+#[derive(Clone, Debug)]
+pub enum TimerInput {}
+
+impl From<TimerInput> for TimerMessage {
+    fn from(_: TimerInput) -> Self {
+        TimerMessage::Tick
+    }
+}
+
+// Internal message - not meant to be used directly by applications
 #[derive(Clone, Debug)]
 pub enum TimerMessage {
     Tick,
@@ -73,6 +100,7 @@ pub struct TimerState {
 pub struct TimerPlugin;
 
 impl Plugin for TimerPlugin {
+    type Input = TimerInput;
     type Message = TimerMessage;
     type State = TimerState;
     type Output = ();
@@ -166,10 +194,10 @@ impl App {
             text("Iced Plugin System - Type-Safe!").size(40),
             text(format!("Counter: {}", counter_value)).size(30),
             button("Increment").on_press(Message::Plugin(
-                self.counter_handle.message(CounterMessage::Increment)
+                self.counter_handle.input(CounterInput::Increment)
             )),
             button("Decrement").on_press(Message::Plugin(
-                self.counter_handle.message(CounterMessage::Decrement)
+                self.counter_handle.input(CounterInput::Decrement)
             )),
             text(format!("Timer Ticks: {}", timer_ticks)).size(30),
             text(format!(

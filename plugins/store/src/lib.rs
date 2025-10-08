@@ -50,9 +50,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::fs;
 
-/// Messages that the store plugin handles
+/// Public input API that applications use
 #[derive(Clone, Debug)]
-pub enum StoreMessage {
+pub enum StoreInput {
     /// Set a value
     Set {
         group: String,
@@ -63,18 +63,20 @@ pub enum StoreMessage {
     Get { group: String, key: String },
     /// Delete a value
     Delete { group: String, key: String },
-    /// Internal: result of a get operation
-    GetResult {
-        group: String,
-        key: String,
-        value: Option<String>,
-    },
-    /// Internal: result of save operation
-    SaveResult { group: String, success: bool },
 }
 
-impl StoreMessage {
-    /// Create a Set message with serialization
+impl From<StoreInput> for StoreMessage {
+    fn from(input: StoreInput) -> Self {
+        match input {
+            StoreInput::Set { group, key, value } => StoreMessage::Set { group, key, value },
+            StoreInput::Get { group, key } => StoreMessage::Get { group, key },
+            StoreInput::Delete { group, key } => StoreMessage::Delete { group, key },
+        }
+    }
+}
+
+impl StoreInput {
+    /// Create a Set input with serialization
     pub fn set<T>(group: impl Into<String>, key: impl Into<String>, value: T) -> Self
     where
         T: Serialize,
@@ -91,7 +93,7 @@ impl StoreMessage {
         }
     }
 
-    /// Create a Get message
+    /// Create a Get input
     pub fn get(group: impl Into<String>, key: impl Into<String>) -> Self {
         Self::Get {
             group: group.into(),
@@ -99,13 +101,37 @@ impl StoreMessage {
         }
     }
 
-    /// Create a Delete message
+    /// Create a Delete input
     pub fn delete(group: impl Into<String>, key: impl Into<String>) -> Self {
         Self::Delete {
             group: group.into(),
             key: key.into(),
         }
     }
+}
+
+/// Internal messages that the store plugin handles
+/// Note: This is for internal use. Applications should use `StoreInput` instead.
+#[derive(Clone, Debug)]
+pub enum StoreMessage {
+    /// Set a value
+    Set {
+        group: String,
+        key: String,
+        value: String,
+    },
+    /// Get a value
+    Get { group: String, key: String },
+    /// Delete a value
+    Delete { group: String, key: String },
+    /// Save result
+    SaveResult { group: String, success: bool },
+    /// Get result
+    GetResult {
+        group: String,
+        key: String,
+        value: Option<String>,
+    },
 }
 
 /// Output messages emitted by the store plugin
@@ -212,6 +238,7 @@ impl StorePlugin {
 }
 
 impl Plugin for StorePlugin {
+    type Input = StoreInput;
     type Message = StoreMessage;
     type State = StoreState;
     type Output = StoreOutput;

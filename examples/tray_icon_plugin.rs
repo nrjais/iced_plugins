@@ -1,7 +1,7 @@
 use iced::widget::{button, checkbox, column, row, scrollable, text};
 use iced::{Element, Subscription, Task, window};
 use iced_plugins::{PluginHandle, PluginManager, PluginManagerBuilder, PluginMessage};
-use iced_tray_icon_plugin::{TrayIconMessage, TrayIconOutput, TrayIconPlugin, menu};
+use iced_tray_icon_plugin::{TrayIconInput, TrayIconOutput, TrayIconPlugin, menu};
 
 fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -239,7 +239,7 @@ impl App {
     fn update_tray_icon(&self) -> Task<Message> {
         let icon_data = create_icon(self.status.color());
         self.tray_handle
-            .dispatch(TrayIconMessage::SetIcon(icon_data))
+            .dispatch(TrayIconInput::SetIcon(icon_data))
             .map(From::from)
     }
 
@@ -250,7 +250,7 @@ impl App {
             self.click_count
         );
         self.tray_handle
-            .dispatch(TrayIconMessage::SetTooltip(Some(tooltip)))
+            .dispatch(TrayIconInput::SetTooltip(Some(tooltip)))
             .map(From::from)
     }
 
@@ -316,11 +316,11 @@ impl App {
                 println!("Tray icon visibility: {}", self.visible);
                 if self.visible {
                     self.tray_handle
-                        .dispatch(TrayIconMessage::Show)
+                        .dispatch(TrayIconInput::Show)
                         .map(From::from)
                 } else {
                     self.tray_handle
-                        .dispatch(TrayIconMessage::Hide)
+                        .dispatch(TrayIconInput::Hide)
                         .map(From::from)
                 }
             }

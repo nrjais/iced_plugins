@@ -137,7 +137,17 @@ pub enum WindowEvent {
     Opened(Id),
 }
 
-/// Messages that the window state plugin handles
+#[derive(Clone, Debug)]
+pub enum WindowStateInput {}
+
+impl From<WindowStateInput> for WindowStateMessage {
+    fn from(_: WindowStateInput) -> Self {
+        WindowStateMessage::SaveToDisk
+    }
+}
+
+/// Internal messages that the window state plugin handles
+/// Note: This is for internal use. Applications should use `WindowStateInput` instead.
 #[derive(Clone, Debug)]
 pub enum WindowStateMessage {
     /// Window event
@@ -264,6 +274,7 @@ fn window_events() -> Subscription<WindowStateMessage> {
 }
 
 impl Plugin for WindowStatePlugin {
+    type Input = WindowStateInput;
     type Message = WindowStateMessage;
     type State = WindowPluginState;
     type Output = WindowStateOutput;
