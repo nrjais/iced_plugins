@@ -22,7 +22,7 @@ fn main() -> iced::Result {
 #[derive(Clone)]
 enum Message {
     Plugin(PluginMessage),
-    PluginOutput(WindowStateOutput),
+    WindowSaved,
 }
 
 impl From<PluginMessage> for Message {
@@ -60,9 +60,9 @@ impl App {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Plugin(plugin_msg) => self.plugins.update(plugin_msg).map(From::from),
-            Message::PluginOutput(output) => {
+            Message::WindowSaved => {
                 self.count += 1;
-                println!("count: {}, output: {:?}", self.count, output);
+                println!("count: {}", self.count);
                 Task::none()
             }
         }
@@ -70,9 +70,9 @@ impl App {
 
     fn subscription(&self) -> Subscription<Message> {
         let window_sub = if self.count < 100 {
-            self.window_handle
-                .listen_with(|output| matches!(output, WindowStateOutput::StateSaved(_)))
-                .map(Message::PluginOutput)
+            self.window_handle.listen_with(|output| {
+                matches!(output, WindowStateOutput::StateSaved(_)).then(|| Message::WindowSaved)
+            })
         } else {
             Subscription::none()
         };

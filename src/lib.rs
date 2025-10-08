@@ -41,15 +41,15 @@ pub trait Plugin: Send + Sync + Debug {
 type OutputRegistry = Arc<Mutex<HashMap<usize, Vec<mpsc::UnboundedSender<PluginOutput>>>>>;
 
 /// Creates a stream that listens for plugin outputs with optional filtering
-fn output_listener_filtered<O: Clone + Send + Sync + 'static>(
+fn output_listener_filtered<O: Clone + Send + Sync + 'static, R>(
     plugin_index: usize,
     output_type_id: TypeId,
     registry: OutputRegistry,
-    filter: Option<Arc<dyn Fn(&O) -> bool + Send + Sync>>,
-) -> impl iced::futures::Stream<Item = O> {
+    filter: Arc<dyn Fn(O) -> Option<R> + Send + Sync>,
+) -> impl iced::futures::Stream<Item = R> {
     use iced::futures::{SinkExt, StreamExt};
 
-    iced::stream::channel(100, move |mut output_sender: mpsc::Sender<O>| async move {
+    iced::stream::channel(100, move |mut output_sender: mpsc::Sender<R>| async move {
         let (sender, mut receiver) = mpsc::unbounded();
 
         if let Ok(mut reg) = registry.lock() {
@@ -63,16 +63,13 @@ fn output_listener_filtered<O: Clone + Send + Sync + 'static>(
                 Some(output) => {
                     if plugin_index == output.plugin_index()
                         && output_type_id == output.type_id
-                        && let Some(typed_output) = output.downcast::<O>()
+                        && let Some(output) = output.downcast::<O>()
                     {
-                        let should_send = match &filter {
-                            Some(f) => f(typed_output),
-                            None => true,
-                        };
-
-                        if should_send && output_sender.send(typed_output.clone()).await.is_err() {
+                        if let Some(event) = filter(output.clone())
+                            && output_sender.send(event).await.is_err()
+                        {
                             break;
-                        }
+                        };
                     }
                 }
                 None => break,
@@ -132,7 +129,7 @@ impl<P: Plugin> PluginHandle<P> {
     /// }
     /// ```
     pub fn listen(&self) -> iced::Subscription<P::Output> {
-        self.listen_with_filter(None)
+        self.listen_with_filter(Arc::new(|output| Some(output)))
     }
 
     /// Subscribe to filtered outputs from this plugin
@@ -150,27 +147,29 @@ impl<P: Plugin> PluginHandle<P> {
     ///         .map(Message::WindowOutput)
     /// }
     /// ```
-    pub fn listen_with<F>(&self, filter: F) -> iced::Subscription<P::Output>
+    pub fn listen_with<F, O>(&self, filter: F) -> iced::Subscription<O>
     where
-        F: Fn(&P::Output) -> bool + Send + Sync + 'static,
+        F: Fn(P::Output) -> Option<O> + Send + Sync + 'static,
+        O: Clone + Send + Sync + 'static,
     {
-        self.listen_with_filter(Some(Arc::new(filter)))
+        self.listen_with_filter(Arc::new(filter))
     }
 
-    fn listen_with_filter(
+    fn listen_with_filter<O: Clone + Send + Sync + 'static>(
         &self,
-        filter: Option<Arc<dyn Fn(&P::Output) -> bool + Send + Sync>>,
-    ) -> iced::Subscription<P::Output> {
-        struct ListenState<O> {
+        filter: Arc<dyn Fn(P::Output) -> Option<O> + Send + Sync + 'static>,
+    ) -> iced::Subscription<O> {
+        struct ListenState<O, R> {
             plugin_index: usize,
             output_type_id: TypeId,
             registry: OutputRegistry,
-            filter: Option<Arc<dyn Fn(&O) -> bool + Send + Sync>>,
+            filter: Arc<dyn Fn(O) -> Option<R> + Send + Sync>,
             filter_id: u64,
             _phantom: std::marker::PhantomData<O>,
+            _phantom_r: std::marker::PhantomData<R>,
         }
 
-        impl<O> std::hash::Hash for ListenState<O> {
+        impl<O, R> std::hash::Hash for ListenState<O, R> {
             fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
                 self.plugin_index.hash(state);
                 std::any::type_name::<O>().hash(state);
@@ -178,7 +177,7 @@ impl<P: Plugin> PluginHandle<P> {
             }
         }
 
-        impl<O> Clone for ListenState<O> {
+        impl<O, R> Clone for ListenState<O, R> {
             fn clone(&self) -> Self {
                 Self {
                     plugin_index: self.plugin_index,
@@ -187,14 +186,15 @@ impl<P: Plugin> PluginHandle<P> {
                     filter: self.filter.clone(),
                     filter_id: self.filter_id,
                     _phantom: std::marker::PhantomData,
+                    _phantom_r: std::marker::PhantomData,
                 }
             }
         }
 
-        fn create_stream<O: Clone + Send + Sync + 'static>(
-            state: &ListenState<O>,
-        ) -> iced::futures::stream::BoxStream<'static, O> {
-            Box::pin(output_listener_filtered::<O>(
+        fn create_stream<O: Clone + Send + Sync + 'static, R: Clone + Send + Sync + 'static>(
+            state: &ListenState<O, R>,
+        ) -> iced::futures::stream::BoxStream<'static, R> {
+            Box::pin(output_listener_filtered::<O, R>(
                 state.plugin_index,
                 state.output_type_id,
                 Arc::clone(&state.registry),
@@ -202,21 +202,17 @@ impl<P: Plugin> PluginHandle<P> {
             ))
         }
 
-        let filter_id = filter
-            .as_ref()
-            .map(|f| Arc::as_ptr(f) as *const () as u64)
-            .unwrap_or(0);
-
-        let state = ListenState::<P::Output> {
+        let state = ListenState::<P::Output, O> {
             plugin_index: self.plugin_index,
             output_type_id: TypeId::of::<P::Output>(),
             registry: Arc::clone(&self.output_registry),
+            filter_id: Arc::as_ptr(&filter) as *const () as u64,
             filter,
-            filter_id,
             _phantom: std::marker::PhantomData,
+            _phantom_r: std::marker::PhantomData,
         };
 
-        iced::Subscription::run_with(state, create_stream::<P::Output>)
+        iced::Subscription::run_with(state, create_stream::<P::Output, O>)
     }
 }
 
