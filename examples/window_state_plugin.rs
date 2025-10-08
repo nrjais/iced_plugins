@@ -34,7 +34,6 @@ impl From<PluginMessage> for Message {
 struct App {
     plugins: PluginManager,
     window_handle: PluginHandle<WindowStatePlugin>,
-    count: u32,
 }
 
 impl App {
@@ -51,7 +50,6 @@ impl App {
             App {
                 plugins,
                 window_handle,
-                count: 0,
             },
             init_task.map(From::from),
         )
@@ -60,22 +58,14 @@ impl App {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Plugin(plugin_msg) => self.plugins.update(plugin_msg).map(From::from),
-            Message::WindowSaved => {
-                self.count += 1;
-                println!("count: {}", self.count);
-                Task::none()
-            }
+            Message::WindowSaved => Task::none(),
         }
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let window_sub = if self.count < 100 {
-            self.window_handle.listen_with(|output| {
-                matches!(output, WindowStateOutput::StateSaved(_)).then(|| Message::WindowSaved)
-            })
-        } else {
-            Subscription::none()
-        };
+        let window_sub = self.window_handle.listen_with(|output| {
+            matches!(output, WindowStateOutput::StateSaved(_)).then(|| Message::WindowSaved)
+        });
         Subscription::batch([self.plugins.subscriptions().map(From::from), window_sub])
     }
 
