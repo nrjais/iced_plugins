@@ -99,7 +99,7 @@ impl<P: Plugin> PluginHandle<P> {
     /// let task = handle.dispatch(MyInput::DoSomething);
     /// ```
     pub fn dispatch(&self, input: P::Input) -> Task<PluginMessage> {
-        Task::done(self.input(input).into())
+        Task::done(self.input(input))
     }
 
     /// Wrap a plugin input into a PluginMessage for use in messages
@@ -296,6 +296,9 @@ type AnyRef = dyn Any + Send + Sync;
 type AnyPlugin = Arc<dyn Any + Send + Sync>;
 type AnyMessage = Arc<dyn Any + Send + Sync>;
 
+type UpdateFn =
+    dyn Fn(&mut dyn Any, AnyMessage) -> (Task<PluginMessage>, Option<PluginOutput>) + Send + Sync;
+
 /// Holds a single plugin instance with its state and behavior
 struct PluginEntry {
     name: &'static str,
@@ -305,11 +308,7 @@ struct PluginEntry {
     output_type_id: TypeId,
     plugin: AnyPlugin,
     plugin_index: usize,
-    update_fn: Box<
-        dyn Fn(&mut dyn Any, AnyMessage) -> (Task<PluginMessage>, Option<PluginOutput>)
-            + Send
-            + Sync,
-    >,
+    update_fn: Box<UpdateFn>,
     subscription_fn: fn(&dyn Any, &AnyRef, usize) -> Subscription<PluginMessage>,
 }
 
