@@ -35,7 +35,10 @@
 //! }
 //! ```
 
+#[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "linux")]
+mod linux;
 
 use iced::task::{Straw, sipper};
 use iced::time::every;
@@ -47,7 +50,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
 
 /// Configuration for the auto updater
 #[derive(Debug, Clone)]
@@ -395,28 +397,11 @@ impl AutoUpdaterPlugin {
         let os = Self::detect_os();
 
         match os {
+            #[cfg(target_os = "macos")]
             "macos" => macos::install(file_path).await,
-            "linux" => Self::install_deb(file_path).await,
+            #[cfg(target_os = "linux")]
+            "linux" => linux::install_deb(file_path).await,
             _ => Err(format!("Unsupported platform: {}", os)),
-        }
-    }
-
-    /// Install .deb package on Linux (Debian/Ubuntu)
-    async fn install_deb(deb_path: PathBuf) -> Result<(), String> {
-        let output = Command::new("pkexec")
-            .args(["dpkg", "-i"])
-            .arg(&deb_path)
-            .output()
-            .await
-            .map_err(|e| format!("Failed to install .deb: {}", e))?;
-
-        if output.status.success() {
-            Ok(())
-        } else {
-            Err(format!(
-                "Failed to install .deb package: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ))
         }
     }
 
