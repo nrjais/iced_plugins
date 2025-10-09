@@ -3,19 +3,26 @@
 //! This plugin provides system tray icon functionality for Iced applications.
 //! ```
 
+mod menu;
+
 use iced::futures::SinkExt;
 use iced::futures::channel::mpsc::Sender;
 use iced::{Subscription, Task};
 use iced_plugins::Plugin;
+use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::time::Duration;
 
-// Re-export tray-icon types for direct access
-pub use tray_icon;
-pub use tray_icon::menu;
-pub use tray_icon::{Icon, TrayIconBuilder};
+// Re-export only Icon for convenience
+pub use tray_icon::Icon;
 
-use tray_icon::menu::{Menu, MenuEvent};
-use tray_icon::{TrayIcon, TrayIconEvent};
+use tray_icon::menu::MenuEvent;
+use tray_icon::{TrayIcon, TrayIconBuilder, TrayIconEvent};
+
+pub use menu::{Menu, MenuItem};
+use menu::{NativeMenuItem, update_menu_items};
+
+use crate::menu::{build_native_menu, create_icon};
 
 /// Public input API that applications use
 #[derive(Clone, Debug)]
@@ -24,6 +31,8 @@ pub enum TrayIconInput {
     SetIcon(Vec<u8>),
     /// Update the tooltip
     SetTooltip(Option<String>),
+    /// Update the menu
+    UpdateMenu(Menu),
     /// Show the tray icon
     Show,
     /// Hide the tray icon
@@ -35,6 +44,7 @@ impl From<TrayIconInput> for TrayIconMessage {
         match input {
             TrayIconInput::SetIcon(data) => TrayIconMessage::SetIcon(data),
             TrayIconInput::SetTooltip(tooltip) => TrayIconMessage::SetTooltip(tooltip),
+            TrayIconInput::UpdateMenu(menu) => TrayIconMessage::UpdateMenu(menu),
             TrayIconInput::Show => TrayIconMessage::Show,
             TrayIconInput::Hide => TrayIconMessage::Hide,
         }
@@ -49,9 +59,11 @@ pub enum TrayIconMessage {
     SetIcon(Vec<u8>),
     /// Update the tooltip
     SetTooltip(Option<String>),
-    /// Internal: menu event occurred
+    /// Update the menu
+    UpdateMenu(Menu),
+    /// Menu event occurred
     MenuEvent(String),
-    /// Internal: tray icon event occurred
+    /// Tray icon event occurred
     TrayEvent(TrayIconEventKind),
     /// Show the tray icon
     Show,
@@ -108,7 +120,6 @@ unsafe impl Send for TrayIconWrapper {}
 unsafe impl Sync for TrayIconWrapper {}
 
 /// The plugin state held by the PluginManager
-#[derive(Debug)]
 pub struct TrayIconState {
     /// The tray icon instance (wrapped for Send)
     tray_icon: Option<TrayIconWrapper>,
@@ -116,27 +127,33 @@ pub struct TrayIconState {
     tooltip: Option<String>,
     /// Current icon bytes
     icon_bytes: Option<Vec<u8>>,
+    /// Current menu data
+    current_menu: Option<Menu>,
+    /// Native menu items lookup by ID
+    native_items: HashMap<String, Arc<NativeMenuItem>>,
+}
+
+impl std::fmt::Debug for TrayIconState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TrayIconState")
+            .field("has_tray_icon", &self.tray_icon.is_some())
+            .field("tooltip", &self.tooltip)
+            .field("has_icon_bytes", &self.icon_bytes.is_some())
+            .field("has_menu", &self.current_menu.is_some())
+            .field("native_items_count", &self.native_items.len())
+            .finish()
+    }
 }
 
 /// Tray icon plugin configuration
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TrayIconPlugin {
     /// Tooltip text for the tray icon
     tooltip: Option<String>,
     /// Icon data (PNG format)
     icon_data: Option<Vec<u8>>,
-    /// Menu (stored as a function that creates it, since Menu is not Clone)
-    menu_fn: Option<Arc<dyn Fn() -> Menu + Send + Sync>>,
-}
-
-impl std::fmt::Debug for TrayIconPlugin {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TrayIconPlugin")
-            .field("tooltip", &self.tooltip)
-            .field("has_icon_data", &self.icon_data.is_some())
-            .field("has_menu", &self.menu_fn.is_some())
-            .finish()
-    }
+    /// Menu
+    menu: Option<Menu>,
 }
 
 impl TrayIconPlugin {
@@ -145,7 +162,7 @@ impl TrayIconPlugin {
         Self {
             tooltip: Some(tooltip.into()),
             icon_data: None,
-            menu_fn: None,
+            menu: None,
         }
     }
 
@@ -156,28 +173,14 @@ impl TrayIconPlugin {
     }
 
     /// Set the icon from a resource
-    pub fn with_icon_from_resource(mut self, bytes: &[u8]) -> Self {
+    pub fn with_icon_from_slice(mut self, bytes: &[u8]) -> Self {
         self.icon_data = Some(bytes.to_vec());
         self
     }
 
-    /// Set the menu using a builder function
-    /// The function will be called during initialization to create the menu.
-    ///
-    /// # Example
-    /// ```ignore
-    /// TrayIconPlugin::new("My App")
-    ///     .with_menu(|| {
-    ///         let menu = menu::Menu::new();
-    ///         menu.append(&menu::MenuItem::new("Item", true, None)).unwrap();
-    ///         menu
-    ///     })
-    /// ```
-    pub fn with_menu<F>(mut self, menu_builder: F) -> Self
-    where
-        F: Fn() -> Menu + Send + Sync + 'static,
-    {
-        self.menu_fn = Some(Arc::new(menu_builder));
+    /// Set the menu
+    pub fn with_menu(mut self, menu: Menu) -> Self {
+        self.menu = Some(menu);
         self
     }
 
@@ -185,18 +188,6 @@ impl TrayIconPlugin {
     pub fn with_tooltip(mut self, tooltip: impl Into<String>) -> Self {
         self.tooltip = Some(tooltip.into());
         self
-    }
-
-    /// Create an icon from bytes
-    fn create_icon(bytes: &[u8]) -> Result<Icon, String> {
-        let image = image::load_from_memory(bytes)
-            .map_err(|e| format!("Failed to load icon image: {}", e))?;
-
-        let rgba = image.to_rgba8();
-        let (width, height) = rgba.dimensions();
-
-        Icon::from_rgba(rgba.into_raw(), width, height)
-            .map_err(|e| format!("Failed to create icon: {}", e))
     }
 }
 
@@ -213,7 +204,7 @@ impl Plugin for TrayIconPlugin {
     fn init(&self) -> (Self::State, Task<Self::Message>) {
         // Create icon if data is provided
         let icon = if let Some(ref icon_data) = self.icon_data {
-            match Self::create_icon(icon_data) {
+            match create_icon(icon_data) {
                 Ok(icon) => Some(icon),
                 Err(e) => {
                     eprintln!("Failed to create tray icon: {}", e);
@@ -222,6 +213,14 @@ impl Plugin for TrayIconPlugin {
             }
         } else {
             None
+        };
+
+        // Build native menu if provided
+        let (native_menu, native_items) = if let Some(ref menu) = self.menu {
+            let (native, items) = build_native_menu(menu);
+            (Some(native), items)
+        } else {
+            (None, HashMap::new())
         };
 
         // Build tray icon
@@ -236,9 +235,8 @@ impl Plugin for TrayIconPlugin {
                 builder = builder.with_tooltip(tooltip);
             }
 
-            if let Some(ref menu_fn) = self.menu_fn {
-                let menu = menu_fn();
-                builder = builder.with_menu(Box::new(menu));
+            if let Some(native_menu) = native_menu {
+                builder = builder.with_menu(Box::new(native_menu));
             }
 
             match builder.build() {
@@ -256,6 +254,8 @@ impl Plugin for TrayIconPlugin {
             tray_icon,
             tooltip: self.tooltip.clone(),
             icon_bytes: self.icon_data.clone(),
+            current_menu: self.menu.clone(),
+            native_items,
         };
 
         (state, Task::none())
@@ -269,7 +269,7 @@ impl Plugin for TrayIconPlugin {
         match message {
             TrayIconMessage::SetIcon(bytes) => {
                 if let Some(tray_wrapper) = state.tray_icon.as_mut() {
-                    match Self::create_icon(&bytes) {
+                    match create_icon(&bytes) {
                         Ok(icon) => {
                             let result = tray_wrapper.with_mut(|tray| tray.set_icon(Some(icon)));
                             if let Err(e) = result {
@@ -303,6 +303,16 @@ impl Plugin for TrayIconPlugin {
                     }
                     state.tooltip = tooltip;
                 }
+                (Task::none(), None)
+            }
+
+            TrayIconMessage::UpdateMenu(new_menu) => {
+                // Update existing native menu items with new data
+                for item in new_menu.items() {
+                    update_menu_items(item, &state.native_items);
+                }
+
+                state.current_menu = Some(new_menu);
                 (Task::none(), None)
             }
 
@@ -370,7 +380,7 @@ fn menu_event_stream() -> iced::futures::stream::BoxStream<'static, TrayIconMess
                     let _ = output.send(TrayIconMessage::MenuEvent(event.id.0)).await;
                 }
 
-                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
         },
     ))
@@ -393,7 +403,7 @@ fn tray_event_stream() -> iced::futures::stream::BoxStream<'static, TrayIconMess
                     let _ = output.send(TrayIconMessage::TrayEvent(kind)).await;
                 }
 
-                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
         },
     ))

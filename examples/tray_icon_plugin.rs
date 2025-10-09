@@ -1,7 +1,7 @@
 use iced::widget::{button, checkbox, column, row, scrollable, text};
 use iced::{Element, Subscription, Task, window};
 use iced_plugins::{PluginHandle, PluginManager, PluginManagerBuilder, PluginMessage};
-use iced_tray_icon_plugin::{TrayIconInput, TrayIconOutput, TrayIconPlugin, menu};
+use iced_tray_icon_plugin::{Menu, MenuItem, TrayIconInput, TrayIconOutput, TrayIconPlugin};
 
 fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -77,18 +77,14 @@ impl App {
         // Create the icon
         let icon_data = create_icon(Status::Online.color());
 
-        // Setup plugins with menu builder function
-        let auto_start_init = true;
-        let notifications_init = true;
-        let status_init = Status::Online;
+        // Setup plugins with initial menu
+        let initial_menu = Self::build_menu(false, true, Status::Online);
 
         let mut builder = PluginManagerBuilder::new();
         let tray_handle = builder.install(
             TrayIconPlugin::new("Tray Icon Demo")
                 .with_icon(icon_data)
-                .with_menu(move || {
-                    Self::build_menu(auto_start_init, notifications_init, status_init)
-                }),
+                .with_menu(initial_menu),
         );
 
         let (plugins, init_task) = builder.build();
@@ -108,132 +104,71 @@ impl App {
         )
     }
 
-    fn build_menu(auto_start: bool, notifications: bool, status: Status) -> menu::Menu {
-        use menu::{CheckMenuItem, Menu, MenuId, MenuItem, PredefinedMenuItem, Submenu};
+    fn build_menu(auto_start: bool, notifications: bool, status: Status) -> Menu {
+        let mut menu = Menu::new();
 
-        let menu = Menu::new();
+        // Show/Hide items
+        menu.add_item(MenuItem::new("show", "Show Tray Icon", true));
+        menu.add_item(MenuItem::new("hide", "Hide Tray Icon", true));
+        menu.add_item(MenuItem::separator());
 
-        menu.append(&MenuItem::with_id(
-            MenuId::new("show"),
-            "Show Tray Icon",
+        // Status submenu
+        let status_menu = MenuItem::new_submenu(
+            "status_submenu",
+            "Status",
             true,
-            None,
-        ))
-        .unwrap();
-        menu.append(&MenuItem::with_id(
-            MenuId::new("hide"),
-            "Hide Tray Icon",
-            true,
-            None,
-        ))
-        .unwrap();
-
-        menu.append(&PredefinedMenuItem::separator()).unwrap();
-
-        let status_menu = Submenu::with_id(MenuId::new("status_submenu"), "Status", true);
-        status_menu
-            .append(&CheckMenuItem::with_id(
-                MenuId::new("status_online"),
-                "🟢 Online",
-                true,
-                status == Status::Online,
-                None,
-            ))
-            .unwrap();
-        status_menu
-            .append(&CheckMenuItem::with_id(
-                MenuId::new("status_away"),
-                "🟡 Away",
-                true,
-                status == Status::Away,
-                None,
-            ))
-            .unwrap();
-        status_menu
-            .append(&CheckMenuItem::with_id(
-                MenuId::new("status_busy"),
-                "🔴 Busy",
-                true,
-                status == Status::Busy,
-                None,
-            ))
-            .unwrap();
-        status_menu
-            .append(&CheckMenuItem::with_id(
-                MenuId::new("status_offline"),
-                "⚫ Offline",
-                true,
-                status == Status::Offline,
-                None,
-            ))
-            .unwrap();
-
-        menu.append(&status_menu).unwrap();
-        menu.append(&PredefinedMenuItem::separator()).unwrap();
+            vec![
+                MenuItem::new_check("status_online", "🟢 Online", true, status == Status::Online),
+                MenuItem::new_check("status_away", "🟡 Away", true, status == Status::Away),
+                MenuItem::new_check("status_busy", "🔴 Busy", true, status == Status::Busy),
+                MenuItem::new_check(
+                    "status_offline",
+                    "⚫ Offline",
+                    true,
+                    status == Status::Offline,
+                ),
+            ],
+        );
+        menu.add_item(status_menu);
+        menu.add_item(MenuItem::separator());
 
         // Settings submenu
-        let settings_menu = Submenu::with_id(MenuId::new("settings_submenu"), "Settings", true);
-        settings_menu
-            .append(&CheckMenuItem::with_id(
-                MenuId::new("auto_start"),
-                "Start on Login",
-                true,
-                auto_start,
-                None,
-            ))
-            .unwrap();
-        settings_menu
-            .append(&CheckMenuItem::with_id(
-                MenuId::new("notifications"),
-                "Enable Notifications",
-                true,
-                notifications,
-                None,
-            ))
-            .unwrap();
-        settings_menu
-            .append(&PredefinedMenuItem::separator())
-            .unwrap();
-        settings_menu
-            .append(&MenuItem::with_id(
-                MenuId::new("preferences"),
-                "Preferences...",
-                true,
-                None,
-            ))
-            .unwrap();
-
-        menu.append(&settings_menu).unwrap();
-        menu.append(&PredefinedMenuItem::separator()).unwrap();
+        let settings_menu = MenuItem::new_submenu(
+            "settings_submenu",
+            "Settings",
+            true,
+            vec![
+                MenuItem::new_check("auto_start", "Start on Login", true, auto_start),
+                MenuItem::new_check("notifications", "Enable Notifications", true, notifications),
+                MenuItem::separator(),
+                MenuItem::new("preferences", "Preferences...", true),
+            ],
+        );
+        menu.add_item(settings_menu);
+        menu.add_item(MenuItem::separator());
 
         // About and Quit
-        menu.append(&MenuItem::with_id(
-            MenuId::new("about"),
-            "About",
-            true,
-            None,
-        ))
-        .unwrap();
-        menu.append(&PredefinedMenuItem::separator()).unwrap();
-        menu.append(&MenuItem::with_id(MenuId::new("quit"), "Quit", true, None))
-            .unwrap();
+        menu.add_item(MenuItem::new("about", "About", true));
+        menu.add_item(MenuItem::separator());
+        menu.add_item(MenuItem::new("quit", "Quit", true));
 
         menu
     }
 
     fn update_tray_menu(&self) -> Task<Message> {
-        // Note: Dynamic menu rebuilding is not supported due to the tray-icon library
-        // using non-Send types (Rc). To update menu state, you would need to:
-        // 1. Store references to menu items during initialization
-        // 2. Update them directly using their methods (e.g., CheckMenuItem::set_checked())
-        //
-        // For this example, we'll just log that the menu would be updated
+        // Rebuild the menu with current state and send update
+        let menu = Self::build_menu(self.auto_start, self.notifications_enabled, self.status);
 
         println!(
-            "Menu state changed (auto_start: {}, notifications: {})",
-            self.auto_start, self.notifications_enabled
+            "Updating menu (auto_start: {}, notifications: {}, status: {})",
+            self.auto_start,
+            self.notifications_enabled,
+            self.status.as_str()
         );
-        Task::none()
+
+        self.tray_handle
+            .dispatch(TrayIconInput::UpdateMenu(menu))
+            .map(From::from)
     }
 
     fn update_tray_icon(&self) -> Task<Message> {
@@ -417,17 +352,14 @@ impl App {
             text("").size(10),
             // Info section
             text("Features Demonstrated:").size(18),
-            text("✓ Native tray-icon menu API (no wrappers!)").size(12),
+            text("✓ Ref-counted menu items with update support").size(12),
+            text("✓ Dynamic menu updates (diff-based)").size(12),
             text("✓ Dynamic icon updates (color changes with status)").size(12),
             text("✓ Dynamic tooltip updates").size(12),
             text("✓ Checkable menu items").size(12),
             text("✓ Submenus").size(12),
             text("✓ Menu click event handling").size(12),
             text("✓ Icon click/double-click events").size(12),
-            text("").size(10),
-            text("Note: Menu state is set at initialization.").size(11),
-            text("For dynamic menus, store menu item references").size(11),
-            text("and update them directly (see README).").size(11),
             text("").size(10),
             // Actions
             row![
