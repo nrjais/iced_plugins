@@ -6,10 +6,8 @@
 use iced::widget::{button, column, row, scrollable, text, text_input};
 use iced::{Element, Length, Task};
 use iced_plugins::{PluginHandle, PluginManager, PluginMessage};
-use iced_store_plugin::{StoreInput, StoreOutput, StorePlugin};
+use iced_store_plugin::{AppName, StoreInput, StoreOutput, StorePlugin};
 use serde::{Deserialize, Serialize};
-
-const APP_NAME: &str = "store_example";
 
 fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -63,8 +61,9 @@ enum Message {
 
 impl App {
     fn new() -> (App, Task<Message>) {
+        let app_name = AppName::new("com", "nrjais", "store_plugin");
         let mut builder = iced_plugins::PluginManagerBuilder::new();
-        let store_handle = builder.install(StorePlugin::new(APP_NAME));
+        let store_handle = builder.install(StorePlugin::new(app_name));
         let (plugins, init_task) = builder.build();
 
         let app = App {
