@@ -21,9 +21,6 @@ enum Message {
     ToggleAutoStart,
     ToggleNotifications,
     ChangeStatus(Status),
-    UpdateTrayIcon,
-    UpdateTrayTooltip,
-    UpdateTrayMenu,
     Quit,
 }
 
@@ -281,13 +278,6 @@ impl App {
                     self.update_tray_tooltip(),
                 ])
             }
-
-            Message::UpdateTrayIcon => self.update_tray_icon(),
-
-            Message::UpdateTrayTooltip => self.update_tray_tooltip(),
-
-            Message::UpdateTrayMenu => self.update_tray_menu(),
-
             Message::Quit => {
                 println!("Quitting application...");
                 iced::exit()
@@ -343,25 +333,7 @@ impl App {
             text("").size(10),
             // Manual update buttons
             text("Manual Updates:").size(18),
-            row![
-                button("Update Icon").on_press(Message::UpdateTrayIcon),
-                button("Update Tooltip").on_press(Message::UpdateTrayTooltip),
-                button("Update Menu").on_press(Message::UpdateTrayMenu),
-            ]
-            .spacing(10),
             text("").size(10),
-            // Info section
-            text("Features Demonstrated:").size(18),
-            text("✓ Ref-counted menu items with update support").size(12),
-            text("✓ Dynamic menu updates (diff-based)").size(12),
-            text("✓ Dynamic icon updates (color changes with status)").size(12),
-            text("✓ Dynamic tooltip updates").size(12),
-            text("✓ Checkable menu items").size(12),
-            text("✓ Submenus").size(12),
-            text("✓ Menu click event handling").size(12),
-            text("✓ Icon click/double-click events").size(12),
-            text("").size(10),
-            // Actions
             row![
                 button("Toggle Tray Icon Visibility").on_press(Message::ToggleVisibility),
                 button("Quit").on_press(Message::Quit),
