@@ -3,11 +3,20 @@ use iced::window::Position;
 use iced::{Element, Subscription, Task, window};
 use iced_plugins::{PluginHandle, PluginManager, PluginManagerBuilder, PluginMessage};
 use iced_store_plugin::AppName;
-use iced_window_state_plugin::{WindowStateOutput, WindowStatePlugin};
+use iced_window_state_plugin::{WindowState, WindowStateOutput, WindowStatePlugin};
+
+fn load_window_state() -> WindowState {
+    let app_name = AppName::new("com", "nrjais", "window_state_plugin");
+    let Some(runtime) = tokio::runtime::Runtime::new().ok() else {
+        return WindowState::default();
+    };
+    runtime
+        .block_on(WindowStatePlugin::load(&app_name))
+        .unwrap_or_default()
+}
 
 fn main() -> iced::Result {
-    let app_name = AppName::new("com", "example", "window_state_plugin");
-    let window_state = WindowStatePlugin::load(&app_name).unwrap_or_default();
+    let window_state = load_window_state();
 
     println!("Loading window state: {:?}", window_state);
     iced::application(App::new, App::update, App::view)

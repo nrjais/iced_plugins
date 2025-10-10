@@ -232,19 +232,23 @@ impl WindowStatePlugin {
         self
     }
 
-    /// Load window state from disk (blocking version for pre-app initialization)
-    pub fn load(app_name: &AppName) -> Option<WindowState> {
-        tokio::runtime::Runtime::new()
+    /// Load window state from disk
+    pub async fn load(app_name: &AppName) -> Option<WindowState> {
+        read_value(app_name, WINDOW_STATE_GROUP, WINDOW_STATE_KEY)
+            .await
             .ok()?
-            .block_on(read_value(app_name, WINDOW_STATE_GROUP, WINDOW_STATE_KEY))
-            .ok()
     }
+}
 
-    /// Save window state to disk (async)
-    async fn save_async(app_name: AppName, state: WindowState) -> Result<WindowState, String> {
-        write_value(&app_name, WINDOW_STATE_GROUP, WINDOW_STATE_KEY, &state).await?;
-        Ok(state)
-    }
+fn load_sync(app_name: &AppName) -> Option<WindowState> {
+    tokio::runtime::Runtime::new()
+        .ok()?
+        .block_on(WindowStatePlugin::load(app_name))
+}
+
+async fn save_async(app_name: AppName, state: WindowState) -> Result<WindowState, String> {
+    write_value(&app_name, WINDOW_STATE_GROUP, WINDOW_STATE_KEY, &state).await?;
+    Ok(state)
 }
 
 /// Subscription for listening to all window events
@@ -270,7 +274,7 @@ impl Plugin for WindowStatePlugin {
 
     fn init(&self) -> (Self::State, Task<Self::Message>) {
         let state = WindowPluginState {
-            state: Self::load(&self.app_name).unwrap_or_default(),
+            state: load_sync(&self.app_name).unwrap_or_default(),
             dirty: false,
             app_name: self.app_name.clone(),
             oldest_window_id: None,
@@ -327,7 +331,7 @@ impl Plugin for WindowStatePlugin {
                     let app_name = state.app_name.clone();
                     let window_state = state.state.clone();
                     let task = Task::perform(
-                        Self::save_async(app_name, window_state),
+                        save_async(app_name, window_state),
                         WindowStateMessage::SaveCompleted,
                     );
                     (task, None)
