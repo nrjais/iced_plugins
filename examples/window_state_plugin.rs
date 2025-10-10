@@ -2,11 +2,12 @@ use iced::widget::{column, container, scrollable, text};
 use iced::window::Position;
 use iced::{Element, Subscription, Task, window};
 use iced_plugins::{PluginHandle, PluginManager, PluginManagerBuilder, PluginMessage};
+use iced_store_plugin::AppName;
 use iced_window_state_plugin::{WindowStateOutput, WindowStatePlugin};
-const APP_NAME: &str = "window_state_plugin";
 
 fn main() -> iced::Result {
-    let window_state = WindowStatePlugin::load(APP_NAME).unwrap_or_default();
+    let app_name = AppName::new("com", "example", "window_state_plugin");
+    let window_state = WindowStatePlugin::load(&app_name).unwrap_or_default();
 
     println!("Loading window state: {:?}", window_state);
     iced::application(App::new, App::update, App::view)
@@ -38,9 +39,11 @@ struct App {
 
 impl App {
     fn new() -> (Self, Task<Message>) {
+        let app_name = AppName::new("com", "example", "window_state_plugin");
+
         // Use the builder pattern to set up plugins
         let (plugins, init_task) = PluginManagerBuilder::new()
-            .with_plugin(WindowStatePlugin::new(APP_NAME.to_string()))
+            .with_plugin(WindowStatePlugin::new(app_name))
             .build();
 
         // Retrieve handle after building
@@ -73,10 +76,10 @@ impl App {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let Some((window_state, config_path)) = self
+        let Some((window_state, app_name)) = self
             .plugins
             .get_plugin_state::<WindowStatePlugin>()
-            .map(|s| (s.current_state(), s.config_path()))
+            .map(|s| (s.current_state(), s.app_name()))
         else {
             return container(text("No window state found")).into();
         };
@@ -99,7 +102,7 @@ impl App {
             window_state.position.y,
         );
 
-        let path_text = format!("Config: {}", config_path.display());
+        let path_text = format!("App: {:?}", app_name);
 
         let content = column![
             text("Window State Plugin").size(32),

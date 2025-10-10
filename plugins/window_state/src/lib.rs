@@ -10,18 +10,20 @@
 //! - Subscribe to window resize and move events
 //! - Debounced auto-save every 2 seconds
 //! - Only tracks the first window (main window) in multi-window apps
+//! - Uses the store plugin for persistence
 //!
 //! # Example
 //!
 //! ```ignore
 //! use iced_window_state_plugin::WindowStatePlugin;
+//! use iced_store_plugin::AppName;
 //! use iced::window::Position;
 //!
-//! const APP_NAME: &str = "my_app";
-//!
 //! fn main() -> iced::Result {
+//!     let app_name = AppName::new("com", "example", "myapp");
+//!
 //!     // Load window state before creating the app
-//!     let window_state = WindowStatePlugin::load(APP_NAME).unwrap_or_default();
+//!     let window_state = WindowStatePlugin::load(&app_name).unwrap_or_default();
 //!
 //!     iced::application(App::new, App::update, App::view)
 //!         .window(window::Settings {
@@ -34,7 +36,7 @@
 //!
 //! // In your app initialization:
 //! let mut plugins = PluginManager::new();
-//! plugins.install(WindowStatePlugin::new(APP_NAME.to_string()));
+//! plugins.install(WindowStatePlugin::new(app_name));
 //! ```
 
 use iced::Event::Window;
@@ -43,10 +45,12 @@ use iced::time::every;
 use iced::window::{Event, Id};
 use iced::{Subscription, Task};
 use iced_plugins::Plugin;
+use iced_store_plugin::{read_value, write_value};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use std::time::Duration;
-use tokio::fs;
+
+// Re-export AppName for convenience
+pub use iced_store_plugin::AppName;
 
 /// Window state data structure that is serialized to disk
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -179,8 +183,8 @@ pub struct WindowPluginState {
     state: WindowState,
     /// Whether state has changed since last save
     dirty: bool,
-    /// Config path
-    config_path: PathBuf,
+    /// Application name for storage
+    app_name: AppName,
     /// The oldest (main) window ID that we track
     oldest_window_id: Option<Id>,
 }
@@ -191,9 +195,9 @@ impl WindowPluginState {
         &self.state
     }
 
-    /// Get the config path
-    pub fn config_path(&self) -> &PathBuf {
-        &self.config_path
+    /// Get the application name
+    pub fn app_name(&self) -> &AppName {
+        &self.app_name
     }
 
     /// Get the oldest window ID being tracked
@@ -205,21 +209,20 @@ impl WindowPluginState {
 /// Window state plugin that manages window state persistence
 #[derive(Debug, Clone)]
 pub struct WindowStatePlugin {
-    app_name: String,
+    app_name: AppName,
     /// Auto-save interval in seconds
     auto_save_interval: u64,
-    /// Config path
-    config_path: PathBuf,
 }
+
+const WINDOW_STATE_GROUP: &str = "window_state";
+const WINDOW_STATE_KEY: &str = "main";
 
 impl WindowStatePlugin {
     /// Create a new window state plugin with default settings (tracks main window)
-    pub fn new(app_name: String) -> Self {
-        let config_path = Self::config_path(&app_name);
+    pub fn new(app_name: AppName) -> Self {
         Self {
             app_name,
             auto_save_interval: 2,
-            config_path,
         }
     }
 
@@ -229,35 +232,17 @@ impl WindowStatePlugin {
         self
     }
 
-    fn config_path(app_name: &str) -> PathBuf {
-        let config_dir = directories::BaseDirs::new()
-            .map(|dirs| dirs.config_local_dir().to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("."));
-        config_dir
-            .join(app_name)
-            .join("plugins")
-            .join("window_state.json")
-    }
-
     /// Load window state from disk (blocking version for pre-app initialization)
-    pub fn load(app_name: &str) -> Option<WindowState> {
-        let path = Self::config_path(app_name);
-        let contents = std::fs::read_to_string(&path).ok()?;
-        serde_json::from_str(&contents).ok()
+    pub fn load(app_name: &AppName) -> Option<WindowState> {
+        tokio::runtime::Runtime::new()
+            .ok()?
+            .block_on(read_value(app_name, WINDOW_STATE_GROUP, WINDOW_STATE_KEY))
+            .ok()
     }
 
     /// Save window state to disk (async)
-    async fn save_async(path: PathBuf, state: WindowState) -> Result<WindowState, String> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .map_err(|e| format!("Failed to create config directory: {}", e))?;
-        }
-        let contents = serde_json::to_string_pretty(&state)
-            .map_err(|e| format!("Failed to serialize window state: {}", e))?;
-        fs::write(&path, contents)
-            .await
-            .map_err(|e| format!("Failed to write window state: {}", e))?;
+    async fn save_async(app_name: AppName, state: WindowState) -> Result<WindowState, String> {
+        write_value(&app_name, WINDOW_STATE_GROUP, WINDOW_STATE_KEY, &state).await?;
         Ok(state)
     }
 }
@@ -287,7 +272,7 @@ impl Plugin for WindowStatePlugin {
         let state = WindowPluginState {
             state: Self::load(&self.app_name).unwrap_or_default(),
             dirty: false,
-            config_path: self.config_path.clone(),
+            app_name: self.app_name.clone(),
             oldest_window_id: None,
         };
         (state, Task::none())
@@ -339,10 +324,10 @@ impl Plugin for WindowStatePlugin {
             }
             WindowStateMessage::SaveToDisk => {
                 if state.dirty {
-                    let path = state.config_path.clone();
+                    let app_name = state.app_name.clone();
                     let window_state = state.state.clone();
                     let task = Task::perform(
-                        Self::save_async(path, window_state),
+                        Self::save_async(app_name, window_state),
                         WindowStateMessage::SaveCompleted,
                     );
                     (task, None)
