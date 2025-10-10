@@ -2160,6 +2160,7 @@ dependencies = [
  "directories",
  "iced",
  "iced_plugins",
+ "iced_store_plugin",
  "serde",
  "serde_json",
  "tokio",

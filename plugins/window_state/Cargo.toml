@@ -9,6 +9,7 @@ license = "MIT"
 directories = { workspace = true }
 iced = { workspace = true, features = ["tokio"] }
 iced_plugins = { path = "../.." }
+iced_store_plugin = { path = "../store" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["fs"] }
