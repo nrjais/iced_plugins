@@ -36,3 +36,4 @@ iced_window_state_plugin = { path = "plugins/window_state" }
 image = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
