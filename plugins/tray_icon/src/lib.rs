@@ -228,52 +228,44 @@ impl Plugin for TrayIconPlugin {
             (None, HashMap::new())
         };
 
-        // Initialize GTK in a separate thread
+        // Initialize GTK in the main thread
         let gtk_sender = mpsc::channel().0;
         let mut tray_icon = None;
 
         #[cfg(target_os = "linux")]
         {
-            // Spawn GTK thread for initialization
-            let icon_data = self.icon_data.clone();
-            let tooltip = self.tooltip.clone();
-            let menu_data = self.menu.clone();
-
-            thread::spawn(move || {
-                // Initialize GTK in this thread
-                if let Err(e) = gtk::init() {
-                    eprintln!("Failed to initialize GTK: {}", e);
-                    return;
-                }
-
-                // Create tray icon in GTK thread
+            // Initialize GTK in the main thread (required for proper initialization)
+            if let Err(e) = gtk::init() {
+                eprintln!("Failed to initialize GTK: {}", e);
+            } else {
+                // Create tray icon in main thread
                 if let Some(icon) = icon {
                     let mut builder = TrayIconBuilder::new();
                     builder = builder.with_icon(icon);
 
-                    if let Some(ref tooltip) = tooltip {
+                    if let Some(ref tooltip) = self.tooltip {
                         builder = builder.with_tooltip(tooltip);
                     }
 
-                    // Build menu within the GTK thread to avoid Send issues
-                    if let Some(ref menu) = menu_data {
-                        let (native_menu, _) = build_native_menu(menu);
+                    if let Some(native_menu) = native_menu {
                         builder = builder.with_menu(Box::new(native_menu));
                     }
 
                     match builder.build() {
-                        Ok(_tray) => {
-                            // Tray icon created successfully in GTK thread
+                        Ok(tray) => {
+                            tray_icon = Some(TrayIconWrapper::new(tray));
+
+                            // Spawn GTK main loop in a separate thread
+                            thread::spawn(|| {
+                                gtk::main();
+                            });
                         }
                         Err(e) => {
                             eprintln!("Failed to build tray icon: {}", e);
                         }
                     }
                 }
-
-                // Start GTK main loop
-                gtk::main();
-            });
+            }
         }
 
         #[cfg(not(target_os = "linux"))]
