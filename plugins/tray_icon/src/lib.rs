@@ -236,54 +236,48 @@ impl Plugin for TrayIconPlugin {
             // Initialize GTK application for proper desktop integration
             println!("Running on Linux - Initializing GTK application...");
             let app = gtk::Application::new(Some("com.iced.tray_icon"), Default::default());
+            println!("GTK application created successfully");
 
-            if let Err(e) = app {
-                eprintln!("Failed to create GTK application: {}", e);
-            } else {
-                let app = app.unwrap();
-                println!("GTK application created successfully");
+            // Set application ID for proper desktop integration
+            app.set_application_id(Some("com.iced.tray_icon"));
 
-                // Set application ID for proper desktop integration
-                app.set_application_id(Some("com.iced.tray_icon"));
+            // Create tray icon in main thread
+            if let Some(icon) = icon {
+                println!("Creating tray icon with icon data...");
+                let mut builder = TrayIconBuilder::new();
+                builder = builder.with_icon(icon);
 
-                // Create tray icon in main thread
-                if let Some(icon) = icon {
-                    println!("Creating tray icon with icon data...");
-                    let mut builder = TrayIconBuilder::new();
-                    builder = builder.with_icon(icon);
+                if let Some(ref tooltip) = self.tooltip {
+                    println!("Setting tooltip: {}", tooltip);
+                    builder = builder.with_tooltip(tooltip);
+                }
 
-                    if let Some(ref tooltip) = self.tooltip {
-                        println!("Setting tooltip: {}", tooltip);
-                        builder = builder.with_tooltip(tooltip);
-                    }
+                if let Some(native_menu) = native_menu {
+                    println!("Setting menu...");
+                    builder = builder.with_menu(Box::new(native_menu));
+                }
 
-                    if let Some(native_menu) = native_menu {
-                        println!("Setting menu...");
-                        builder = builder.with_menu(Box::new(native_menu));
-                    }
+                match builder.build() {
+                    Ok(tray) => {
+                        // Ensure the tray icon is visible
+                        if let Err(e) = tray.set_visible(true) {
+                            eprintln!("Failed to make tray icon visible: {}", e);
+                        }
 
-                    match builder.build() {
-                        Ok(tray) => {
-                            // Ensure the tray icon is visible
-                            if let Err(e) = tray.set_visible(true) {
-                                eprintln!("Failed to make tray icon visible: {}", e);
+                        tray_icon = Some(TrayIconWrapper::new(tray));
+                        println!("Tray icon created successfully and set to visible");
+
+                        // Set up GTK event processing in the main thread
+                        glib::timeout_add_local(std::time::Duration::from_millis(10), || {
+                            // Process GTK events without blocking
+                            while gtk::events_pending() {
+                                gtk::main_iteration();
                             }
-
-                            tray_icon = Some(TrayIconWrapper::new(tray));
-                            println!("Tray icon created successfully and set to visible");
-
-                            // Set up GTK event processing in the main thread
-                            glib::timeout_add_local(std::time::Duration::from_millis(10), || {
-                                // Process GTK events without blocking
-                                while gtk::events_pending() {
-                                    gtk::main_iteration();
-                                }
-                                glib::ControlFlow::Continue
-                            });
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to build tray icon: {}", e);
-                        }
+                            glib::ControlFlow::Continue
+                        });
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to build tray icon: {}", e);
                     }
                 }
             }
