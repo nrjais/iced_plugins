@@ -24,6 +24,9 @@ use menu::{NativeMenuItem, update_menu_items};
 
 use crate::menu::{build_native_menu, create_icon};
 
+#[cfg(target_os = "linux")]
+use gtk::glib;
+
 /// Public input API that applications use
 #[derive(Clone, Debug)]
 pub enum TrayIconInput {
@@ -223,32 +226,87 @@ impl Plugin for TrayIconPlugin {
             (None, HashMap::new())
         };
 
-        // Build tray icon
-        let tray_icon = if icon.is_some() {
-            let mut builder = TrayIconBuilder::new();
+        // Initialize GTK and create tray icon
+        let mut tray_icon = None;
 
-            if let Some(icon) = icon {
-                builder = builder.with_icon(icon);
-            }
+        #[cfg(target_os = "linux")]
+        {
+            // Initialize GTK first
+            println!("Running on Linux - Initializing GTK...");
+            if let Err(e) = gtk::init() {
+                eprintln!("Failed to initialize GTK: {}", e);
+            } else {
+                println!("GTK initialized successfully");
 
-            if let Some(ref tooltip) = self.tooltip {
-                builder = builder.with_tooltip(tooltip);
-            }
+                // Create tray icon
+                if let Some(icon) = icon {
+                    println!("Creating tray icon with icon data...");
+                    let mut builder = TrayIconBuilder::new();
+                    builder = builder.with_icon(icon);
 
-            if let Some(native_menu) = native_menu {
-                builder = builder.with_menu(Box::new(native_menu));
-            }
+                    if let Some(ref tooltip) = self.tooltip {
+                        println!("Setting tooltip: {}", tooltip);
+                        builder = builder.with_tooltip(tooltip);
+                    }
 
-            match builder.build() {
-                Ok(tray) => Some(TrayIconWrapper::new(tray)),
-                Err(e) => {
-                    eprintln!("Failed to build tray icon: {}", e);
-                    None
+                    if let Some(native_menu) = native_menu {
+                        println!("Setting menu...");
+                        builder = builder.with_menu(Box::new(native_menu));
+                    }
+
+                    match builder.build() {
+                        Ok(tray) => {
+                            // Ensure the tray icon is visible
+                            if let Err(e) = tray.set_visible(true) {
+                                eprintln!("Failed to make tray icon visible: {}", e);
+                            }
+
+                            tray_icon = Some(TrayIconWrapper::new(tray));
+                            println!("Tray icon created successfully and set to visible");
+
+                            // Start GTK event loop in a background thread
+                            std::thread::spawn(|| {
+                                println!("Starting GTK event loop thread...");
+                                loop {
+                                    // Process all pending GTK events
+                                    glib::MainContext::default().iteration(true);
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to build tray icon: {}", e);
+                        }
+                    }
                 }
             }
-        } else {
-            None
-        };
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            // For non-Linux platforms, create tray icon directly
+            println!("Running on non-Linux platform - creating tray icon directly");
+            if let Some(icon) = icon {
+                let mut builder = TrayIconBuilder::new();
+                builder = builder.with_icon(icon);
+
+                if let Some(ref tooltip) = self.tooltip {
+                    builder = builder.with_tooltip(tooltip);
+                }
+
+                if let Some(native_menu) = native_menu {
+                    builder = builder.with_menu(Box::new(native_menu));
+                }
+
+                match builder.build() {
+                    Ok(tray) => {
+                        tray_icon = Some(TrayIconWrapper::new(tray));
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to build tray icon: {}", e);
+                    }
+                }
+            }
+        }
 
         let state = TrayIconState {
             tray_icon,
