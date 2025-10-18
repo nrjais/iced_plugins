@@ -12,7 +12,6 @@ use iced_plugins::Plugin;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::mpsc;
-use std::thread;
 use tokio::time::Duration;
 
 // Re-export only Icon for convenience
@@ -254,11 +253,6 @@ impl Plugin for TrayIconPlugin {
                     match builder.build() {
                         Ok(tray) => {
                             tray_icon = Some(TrayIconWrapper::new(tray));
-
-                            // Spawn GTK main loop in a separate thread
-                            thread::spawn(|| {
-                                gtk::main();
-                            });
                         }
                         Err(e) => {
                             eprintln!("Failed to build tray icon: {}", e);
@@ -433,8 +427,9 @@ impl Plugin for TrayIconPlugin {
     fn subscription(&self, _state: &Self::State) -> Subscription<Self::Message> {
         let menu_sub = Subscription::run(menu_event_stream);
         let tray_sub = Subscription::run(tray_event_stream);
+        let gtk_sub = Subscription::run(gtk_event_stream);
 
-        Subscription::batch([menu_sub, tray_sub])
+        Subscription::batch([menu_sub, tray_sub, gtk_sub])
     }
 }
 
@@ -474,6 +469,34 @@ fn tray_event_stream() -> iced::futures::stream::BoxStream<'static, TrayIconMess
                 }
 
                 tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        },
+    ))
+}
+
+/// Subscription for GTK events (Linux only)
+fn gtk_event_stream() -> iced::futures::stream::BoxStream<'static, TrayIconMessage> {
+    Box::pin(iced::stream::channel(
+        100,
+        |mut _output: Sender<TrayIconMessage>| async move {
+            #[cfg(target_os = "linux")]
+            {
+                loop {
+                    // Process GTK events without blocking
+                    while gtk::events_pending() {
+                        gtk::main_iteration();
+                    }
+
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            }
+
+            #[cfg(not(target_os = "linux"))]
+            {
+                // On non-Linux platforms, just sleep
+                loop {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
             }
         },
     ))
