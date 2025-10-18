@@ -228,3 +228,11 @@ button("Do Something").on_press(Message::Plugin(
 - `cargo run --example auto_updater_plugin` - Automatic updates from GitHub
 - `cargo run --example store_plugin` - Simple JSON-based data storage
 - `cargo run --example tray_icon_plugin` - System tray icon with menu
+
+
+## System Dependencies
+### Linux
+#### Fedora
+`sudo dnf install libappindicator-gtk3 libappindicator-gtk3-devel `
+#### Debian
+`sudo apt install libgtk-3-dev libxdo-dev libappindicator3-dev`

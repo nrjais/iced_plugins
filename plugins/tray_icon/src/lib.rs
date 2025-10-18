@@ -11,6 +11,8 @@ use iced::{Subscription, Task};
 use iced_plugins::Plugin;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::mpsc;
+use std::thread;
 use tokio::time::Duration;
 
 // Re-export only Icon for convenience
@@ -131,6 +133,8 @@ pub struct TrayIconState {
     current_menu: Option<Menu>,
     /// Native menu items lookup by ID
     native_items: HashMap<String, Arc<NativeMenuItem>>,
+    /// Channel for communicating with GTK thread
+    gtk_sender: Option<mpsc::Sender<TrayIconMessage>>,
 }
 
 impl std::fmt::Debug for TrayIconState {
@@ -141,6 +145,7 @@ impl std::fmt::Debug for TrayIconState {
             .field("has_icon_bytes", &self.icon_bytes.is_some())
             .field("has_menu", &self.current_menu.is_some())
             .field("native_items_count", &self.native_items.len())
+            .field("has_gtk_sender", &self.gtk_sender.is_some())
             .finish()
     }
 }
@@ -223,32 +228,77 @@ impl Plugin for TrayIconPlugin {
             (None, HashMap::new())
         };
 
-        // Build tray icon
-        let tray_icon = if icon.is_some() {
-            let mut builder = TrayIconBuilder::new();
+        // Initialize GTK in a separate thread
+        let gtk_sender = mpsc::channel().0;
+        let mut tray_icon = None;
 
+        #[cfg(target_os = "linux")]
+        {
+            // Spawn GTK thread for initialization
+            let icon_data = self.icon_data.clone();
+            let tooltip = self.tooltip.clone();
+            let native_menu_clone = native_menu.clone();
+
+            thread::spawn(move || {
+                // Initialize GTK in this thread
+                if let Err(e) = gtk::init() {
+                    eprintln!("Failed to initialize GTK: {}", e);
+                    return;
+                }
+
+                // Create tray icon in GTK thread
+                if let Some(icon) = icon {
+                    let mut builder = TrayIconBuilder::new();
+                    builder = builder.with_icon(icon);
+
+                    if let Some(ref tooltip) = tooltip {
+                        builder = builder.with_tooltip(tooltip);
+                    }
+
+                    if let Some(native_menu) = native_menu_clone {
+                        builder = builder.with_menu(Box::new(native_menu));
+                    }
+
+                    match builder.build() {
+                        Ok(_tray) => {
+                            // Tray icon created successfully in GTK thread
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to build tray icon: {}", e);
+                        }
+                    }
+                }
+
+                // Start GTK main loop
+                gtk::main();
+            });
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            // For non-Linux platforms, create tray icon directly
             if let Some(icon) = icon {
+                let mut builder = TrayIconBuilder::new();
                 builder = builder.with_icon(icon);
-            }
 
-            if let Some(ref tooltip) = self.tooltip {
-                builder = builder.with_tooltip(tooltip);
-            }
+                if let Some(ref tooltip) = self.tooltip {
+                    builder = builder.with_tooltip(tooltip);
+                }
 
-            if let Some(native_menu) = native_menu {
-                builder = builder.with_menu(Box::new(native_menu));
-            }
+                if let Some(native_menu) = native_menu {
+                    builder = builder.with_menu(Box::new(native_menu));
+                }
 
-            match builder.build() {
-                Ok(tray) => Some(TrayIconWrapper::new(tray)),
-                Err(e) => {
-                    eprintln!("Failed to build tray icon: {}", e);
-                    None
+                match builder.build() {
+                    Ok(tray) => {
+                        tray_icon = Some(TrayIconWrapper::new(tray));
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to build tray icon: {}", e);
+                    }
                 }
             }
-        } else {
-            None
-        };
+        }
 
         let state = TrayIconState {
             tray_icon,
@@ -256,6 +306,7 @@ impl Plugin for TrayIconPlugin {
             icon_bytes: self.icon_data.clone(),
             current_menu: self.menu.clone(),
             native_items,
+            gtk_sender: Some(gtk_sender),
         };
 
         (state, Task::none())
@@ -268,6 +319,11 @@ impl Plugin for TrayIconPlugin {
     ) -> (Task<Self::Message>, Option<Self::Output>) {
         match message {
             TrayIconMessage::SetIcon(bytes) => {
+                // Send message to GTK thread if available
+                if let Some(ref gtk_sender) = state.gtk_sender {
+                    let _ = gtk_sender.send(TrayIconMessage::SetIcon(bytes.clone()));
+                }
+
                 if let Some(tray_wrapper) = state.tray_icon.as_mut() {
                     match create_icon(&bytes) {
                         Ok(icon) => {
@@ -291,6 +347,11 @@ impl Plugin for TrayIconPlugin {
             }
 
             TrayIconMessage::SetTooltip(tooltip) => {
+                // Send message to GTK thread if available
+                if let Some(ref gtk_sender) = state.gtk_sender {
+                    let _ = gtk_sender.send(TrayIconMessage::SetTooltip(tooltip.clone()));
+                }
+
                 if let Some(tray_wrapper) = state.tray_icon.as_mut() {
                     let result = tray_wrapper.with_mut(|tray| tray.set_tooltip(tooltip.clone()));
                     if let Err(e) = result {
@@ -307,6 +368,11 @@ impl Plugin for TrayIconPlugin {
             }
 
             TrayIconMessage::UpdateMenu(new_menu) => {
+                // Send message to GTK thread if available
+                if let Some(ref gtk_sender) = state.gtk_sender {
+                    let _ = gtk_sender.send(TrayIconMessage::UpdateMenu(new_menu.clone()));
+                }
+
                 // Update existing native menu items with new data
                 for item in new_menu.items() {
                     update_menu_items(item, &state.native_items);
@@ -329,6 +395,11 @@ impl Plugin for TrayIconPlugin {
             }
 
             TrayIconMessage::Show => {
+                // Send message to GTK thread if available
+                if let Some(ref gtk_sender) = state.gtk_sender {
+                    let _ = gtk_sender.send(TrayIconMessage::Show);
+                }
+
                 if let Some(tray_wrapper) = state.tray_icon.as_mut() {
                     let result = tray_wrapper.with_mut(|tray| tray.set_visible(true));
                     if let Err(e) = result {
@@ -344,6 +415,11 @@ impl Plugin for TrayIconPlugin {
             }
 
             TrayIconMessage::Hide => {
+                // Send message to GTK thread if available
+                if let Some(ref gtk_sender) = state.gtk_sender {
+                    let _ = gtk_sender.send(TrayIconMessage::Hide);
+                }
+
                 if let Some(tray_wrapper) = state.tray_icon.as_mut() {
                     let result = tray_wrapper.with_mut(|tray| tray.set_visible(false));
                     if let Err(e) = result {
