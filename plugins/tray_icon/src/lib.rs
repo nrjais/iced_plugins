@@ -260,7 +260,7 @@ impl Plugin for TrayIconPlugin {
                                 while gtk::events_pending() {
                                     gtk::main_iteration();
                                 }
-                                glib::Continue(true)
+                                glib::ControlFlow::Continue
                             });
                         }
                         Err(e) => {
