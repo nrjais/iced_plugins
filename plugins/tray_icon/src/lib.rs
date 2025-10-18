@@ -233,26 +233,44 @@ impl Plugin for TrayIconPlugin {
 
         #[cfg(target_os = "linux")]
         {
-            // Initialize GTK in the main thread (required for proper initialization)
-            if let Err(e) = gtk::init() {
-                eprintln!("Failed to initialize GTK: {}", e);
+            // Initialize GTK application for proper desktop integration
+            println!("Running on Linux - Initializing GTK application...");
+            let app = gtk::Application::new(Some("com.iced.tray_icon"), Default::default());
+
+            if let Err(e) = app {
+                eprintln!("Failed to create GTK application: {}", e);
             } else {
+                let app = app.unwrap();
+                println!("GTK application created successfully");
+
+                // Set application ID for proper desktop integration
+                app.set_application_id(Some("com.iced.tray_icon"));
+
                 // Create tray icon in main thread
                 if let Some(icon) = icon {
+                    println!("Creating tray icon with icon data...");
                     let mut builder = TrayIconBuilder::new();
                     builder = builder.with_icon(icon);
 
                     if let Some(ref tooltip) = self.tooltip {
+                        println!("Setting tooltip: {}", tooltip);
                         builder = builder.with_tooltip(tooltip);
                     }
 
                     if let Some(native_menu) = native_menu {
+                        println!("Setting menu...");
                         builder = builder.with_menu(Box::new(native_menu));
                     }
 
                     match builder.build() {
                         Ok(tray) => {
+                            // Ensure the tray icon is visible
+                            if let Err(e) = tray.set_visible(true) {
+                                eprintln!("Failed to make tray icon visible: {}", e);
+                            }
+
                             tray_icon = Some(TrayIconWrapper::new(tray));
+                            println!("Tray icon created successfully and set to visible");
 
                             // Set up GTK event processing in the main thread
                             glib::timeout_add_local(std::time::Duration::from_millis(10), || {
@@ -274,6 +292,7 @@ impl Plugin for TrayIconPlugin {
         #[cfg(not(target_os = "linux"))]
         {
             // For non-Linux platforms, create tray icon directly
+            println!("Running on non-Linux platform - creating tray icon directly");
             if let Some(icon) = icon {
                 let mut builder = TrayIconBuilder::new();
                 builder = builder.with_icon(icon);
