@@ -258,9 +258,7 @@ impl Plugin for TrayIconPlugin {
                     // Build menu within the GTK thread to avoid Send issues
                     if let Some(ref menu) = menu_data {
                         let (native_menu, _) = build_native_menu(menu);
-                        if let Some(native_menu) = native_menu {
-                            builder = builder.with_menu(Box::new(native_menu));
-                        }
+                        builder = builder.with_menu(Box::new(native_menu));
                     }
 
                     match builder.build() {
