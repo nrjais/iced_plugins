@@ -237,7 +237,7 @@ impl Plugin for TrayIconPlugin {
             // Spawn GTK thread for initialization
             let icon_data = self.icon_data.clone();
             let tooltip = self.tooltip.clone();
-            let native_menu_clone = native_menu.clone();
+            let menu_data = self.menu.clone();
 
             thread::spawn(move || {
                 // Initialize GTK in this thread
@@ -255,8 +255,12 @@ impl Plugin for TrayIconPlugin {
                         builder = builder.with_tooltip(tooltip);
                     }
 
-                    if let Some(native_menu) = native_menu_clone {
-                        builder = builder.with_menu(Box::new(native_menu));
+                    // Build menu within the GTK thread to avoid Send issues
+                    if let Some(ref menu) = menu_data {
+                        let (native_menu, _) = build_native_menu(menu);
+                        if let Some(native_menu) = native_menu {
+                            builder = builder.with_menu(Box::new(native_menu));
+                        }
                     }
 
                     match builder.build() {
