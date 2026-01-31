@@ -321,8 +321,11 @@ impl App {
             text("").size(10),
             // Settings section
             text("Settings:").size(18),
-            checkbox("Start on Login", self.auto_start).on_toggle(|_| Message::ToggleAutoStart),
-            checkbox("Enable Notifications", self.notifications_enabled)
+            checkbox(self.auto_start)
+                .label("Start on Login")
+                .on_toggle(|_| Message::ToggleAutoStart),
+            checkbox(self.notifications_enabled)
+                .label("Enable Notifications")
                 .on_toggle(|_| Message::ToggleNotifications),
             text("").size(10),
             // Stats section
